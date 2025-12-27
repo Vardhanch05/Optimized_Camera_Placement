@@ -26,10 +26,10 @@ function distance(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y)
 }
 
-// Initial render
+// ---------------- Initial Render ----------------
 render(AppState, InteractionState)
 
-// Undo / Redo
+// ---------------- Undo / Redo ----------------
 undoBtn.onclick = () => {
   undo()
   render(AppState, InteractionState)
@@ -40,18 +40,32 @@ redoBtn.onclick = () => {
   render(AppState, InteractionState)
 }
 
-// Mouse down
+// ---------------- Mouse Down ----------------
 canvas.addEventListener("mousedown", (e) => {
-  if (AppState.isClosed) return
-
   const pos = getMousePos(e)
 
-  // Check close condition
+  // CAMERA MODE
+  if (AppState.mode === "camera") {
+    pushState()
+    AppState.cameras.push({
+      id: crypto.randomUUID(),
+      x: pos.x,
+      y: pos.y
+    })
+    render(AppState, InteractionState)
+    return
+  }
+
+  // DRAW MODE
+  if (AppState.isClosed) return
+
+  // Close polygon
   if (AppState.polygon.length >= 3) {
     const first = AppState.polygon[0]
     if (distance(pos, first) < CLOSE_DISTANCE) {
       pushState()
       AppState.isClosed = true
+      AppState.mode = "camera"
       InteractionState.isDrawing = false
       InteractionState.previewPoint = null
       render(AppState, InteractionState)
@@ -67,14 +81,14 @@ canvas.addEventListener("mousedown", (e) => {
   render(AppState, InteractionState)
 })
 
-// Mouse move
+// ---------------- Mouse Move ----------------
 canvas.addEventListener("mousemove", (e) => {
   if (!InteractionState.isDrawing || AppState.isClosed) return
   InteractionState.previewPoint = getMousePos(e)
   render(AppState, InteractionState)
 })
 
-// Mouse up
+// ---------------- Mouse Up ----------------
 canvas.addEventListener("mouseup", () => {
   InteractionState.isDrawing = false
   InteractionState.previewPoint = null

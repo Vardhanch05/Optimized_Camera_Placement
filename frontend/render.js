@@ -5,6 +5,7 @@ export function render(state, interaction) {
   ctx.clearRect(0, 0, canvas.width, canvas.height)
 
   drawPolygon(state.polygon, state.isClosed)
+  drawCameras(state.cameras)
 
   if (!state.isClosed && interaction.isDrawing && interaction.previewPoint) {
     drawPreview(state.polygon, interaction.previewPoint)
@@ -32,7 +33,6 @@ function drawPolygon(points, isClosed) {
 
   ctx.stroke()
 
-  // vertices
   points.forEach((p, i) => {
     ctx.fillStyle = i === 0 ? "green" : "blue"
     ctx.beginPath()
@@ -43,7 +43,6 @@ function drawPolygon(points, isClosed) {
 
 function drawPreview(points, preview) {
   if (points.length === 0) return
-
   const last = points[points.length - 1]
 
   ctx.setLineDash([6, 6])
@@ -55,4 +54,13 @@ function drawPreview(points, preview) {
   ctx.stroke()
 
   ctx.setLineDash([])
+}
+
+function drawCameras(cameras) {
+  cameras.forEach(cam => {
+    ctx.fillStyle = "red"
+    ctx.beginPath()
+    ctx.arc(cam.x, cam.y, 6, 0, Math.PI * 2)
+    ctx.fill()
+  })
 }

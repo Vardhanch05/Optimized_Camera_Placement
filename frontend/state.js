@@ -1,11 +1,13 @@
 // -------- App State --------
 
 export const AppState = {
-  polygon: [],            // [{x, y}]
-  isClosed: false,        // 👈 NEW
-  cameras: [],
+  polygon: [],
+  isClosed: false,
+
+  cameras: [],              // [{ id, x, y }]
   selectedCameraId: null,
-  mode: "draw",
+
+  mode: "draw",             // draw | camera
   coverageVisible: true
 }
 
