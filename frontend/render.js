@@ -7,13 +7,13 @@ export function render(state, interaction) {
   drawPolygon(state.polygon, state.isClosed)
   drawCameras(state.cameras)
 
-  if (!state.isClosed && interaction.isDrawing && interaction.previewPoint) {
-    drawPreview(state.polygon, interaction.previewPoint)
+  if (state.coverageVisible) {
+    drawCoverage(state.coveragePoints)
   }
 }
 
-function drawPolygon(points, isClosed) {
-  if (points.length === 0) return
+function drawPolygon(points, closed) {
+  if (!points.length) return
 
   ctx.strokeStyle = "black"
   ctx.lineWidth = 2
@@ -22,45 +22,34 @@ function drawPolygon(points, isClosed) {
   ctx.moveTo(points[0].x, points[0].y)
   points.slice(1).forEach(p => ctx.lineTo(p.x, p.y))
 
-  if (isClosed) {
+  if (closed) {
     ctx.closePath()
     ctx.fillStyle = "rgba(200,200,200,0.4)"
     ctx.fill()
   }
 
   ctx.stroke()
+}
 
-  points.forEach((p, i) => {
-    ctx.fillStyle = i === 0 ? "green" : "blue"
+function drawCameras(cameras) {
+  cameras.forEach(c => {
+    ctx.strokeStyle = "red"
     ctx.beginPath()
-    ctx.arc(p.x, p.y, 5, 0, Math.PI * 2)
+    ctx.arc(c.x, c.y, c.radius, 0, Math.PI * 2)
+    ctx.stroke()
+
+    ctx.fillStyle = "red"
+    ctx.beginPath()
+    ctx.arc(c.x, c.y, 4, 0, Math.PI * 2)
     ctx.fill()
   })
 }
 
-function drawPreview(points, preview) {
-  if (points.length === 0) return
-  const last = points[points.length - 1]
-
-  ctx.setLineDash([6, 6])
-  ctx.strokeStyle = "#888"
-  ctx.beginPath()
-  ctx.moveTo(last.x, last.y)
-  ctx.lineTo(preview.x, preview.y)
-  ctx.stroke()
-  ctx.setLineDash([])
-}
-
-function drawCameras(cameras) {
-  cameras.forEach(cam => {
-    ctx.fillStyle = "red"
-    ctx.beginPath()
-    ctx.arc(cam.x, cam.y, 6, 0, Math.PI * 2)
-    ctx.fill()
-
-    ctx.strokeStyle = "rgba(255,0,0,0.3)"
-    ctx.beginPath()
-    ctx.arc(cam.x, cam.y, cam.range, 0, Math.PI * 2)
-    ctx.stroke()
+function drawCoverage(points) {
+  points.forEach(p => {
+    ctx.fillStyle = p.covered
+      ? "rgba(0,200,0,0.25)"
+      : "rgba(200,0,0,0.15)"
+    ctx.fillRect(p.x - 2, p.y - 2, 4, 4)
   })
 }
