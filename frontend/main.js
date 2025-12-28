@@ -26,10 +26,10 @@ function distance(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y)
 }
 
-// ---------------- Initial Render ----------------
+// Initial render
 render(AppState, InteractionState)
 
-// ---------------- Undo / Redo ----------------
+// Undo / Redo
 undoBtn.onclick = () => {
   undo()
   render(AppState, InteractionState)
@@ -40,32 +40,39 @@ redoBtn.onclick = () => {
   render(AppState, InteractionState)
 }
 
-// ---------------- Mouse Down ----------------
+// Toggle mode with keyboard
+window.addEventListener("keydown", (e) => {
+  if (e.key === "c") AppState.mode = "camera"
+  if (e.key === "d") AppState.mode = "draw"
+})
+
+// Mouse down
 canvas.addEventListener("mousedown", (e) => {
   const pos = getMousePos(e)
 
   // CAMERA MODE
-  if (AppState.mode === "camera") {
+  if (AppState.mode === "camera" && AppState.isClosed) {
     pushState()
     AppState.cameras.push({
       id: crypto.randomUUID(),
       x: pos.x,
-      y: pos.y
+      y: pos.y,
+      angle: 0,
+      fov: 90,
+      range: 120
     })
     render(AppState, InteractionState)
     return
   }
 
   // DRAW MODE
-  if (AppState.isClosed) return
+  if (AppState.mode !== "draw" || AppState.isClosed) return
 
-  // Close polygon
   if (AppState.polygon.length >= 3) {
     const first = AppState.polygon[0]
     if (distance(pos, first) < CLOSE_DISTANCE) {
       pushState()
       AppState.isClosed = true
-      AppState.mode = "camera"
       InteractionState.isDrawing = false
       InteractionState.previewPoint = null
       render(AppState, InteractionState)
@@ -81,14 +88,14 @@ canvas.addEventListener("mousedown", (e) => {
   render(AppState, InteractionState)
 })
 
-// ---------------- Mouse Move ----------------
+// Mouse move
 canvas.addEventListener("mousemove", (e) => {
   if (!InteractionState.isDrawing || AppState.isClosed) return
   InteractionState.previewPoint = getMousePos(e)
   render(AppState, InteractionState)
 })
 
-// ---------------- Mouse Up ----------------
+// Mouse up
 canvas.addEventListener("mouseup", () => {
   InteractionState.isDrawing = false
   InteractionState.previewPoint = null

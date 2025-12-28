@@ -5,12 +5,15 @@ export function render(state, interaction) {
   ctx.clearRect(0, 0, canvas.width, canvas.height)
 
   drawPolygon(state.polygon, state.isClosed)
-  drawCameras(state.cameras)
 
   if (!state.isClosed && interaction.isDrawing && interaction.previewPoint) {
     drawPreview(state.polygon, interaction.previewPoint)
   }
+
+  state.cameras.forEach(drawCamera)
 }
+
+// ---------- Polygon ----------
 
 function drawPolygon(points, isClosed) {
   if (points.length === 0) return
@@ -20,10 +23,7 @@ function drawPolygon(points, isClosed) {
 
   ctx.beginPath()
   ctx.moveTo(points[0].x, points[0].y)
-
-  for (let i = 1; i < points.length; i++) {
-    ctx.lineTo(points[i].x, points[i].y)
-  }
+  points.slice(1).forEach(p => ctx.lineTo(p.x, p.y))
 
   if (isClosed) {
     ctx.closePath()
@@ -43,8 +43,8 @@ function drawPolygon(points, isClosed) {
 
 function drawPreview(points, preview) {
   if (points.length === 0) return
-  const last = points[points.length - 1]
 
+  const last = points[points.length - 1]
   ctx.setLineDash([6, 6])
   ctx.strokeStyle = "#888"
 
@@ -56,11 +56,39 @@ function drawPreview(points, preview) {
   ctx.setLineDash([])
 }
 
-function drawCameras(cameras) {
-  cameras.forEach(cam => {
-    ctx.fillStyle = "red"
-    ctx.beginPath()
-    ctx.arc(cam.x, cam.y, 6, 0, Math.PI * 2)
-    ctx.fill()
-  })
+// ---------- Camera ----------
+
+function drawCamera(cam) {
+  const rad = (cam.angle * Math.PI) / 180
+  const halfFov = (cam.fov * Math.PI) / 360
+
+  // FOV cone
+  ctx.fillStyle = "rgba(0, 120, 255, 0.25)"
+  ctx.beginPath()
+  ctx.moveTo(cam.x, cam.y)
+  ctx.arc(
+    cam.x,
+    cam.y,
+    cam.range,
+    rad - halfFov,
+    rad + halfFov
+  )
+  ctx.closePath()
+  ctx.fill()
+
+  // Camera body
+  ctx.fillStyle = "red"
+  ctx.beginPath()
+  ctx.arc(cam.x, cam.y, 5, 0, Math.PI * 2)
+  ctx.fill()
+
+  // Direction arrow
+  ctx.strokeStyle = "black"
+  ctx.beginPath()
+  ctx.moveTo(cam.x, cam.y)
+  ctx.lineTo(
+    cam.x + Math.cos(rad) * 20,
+    cam.y + Math.sin(rad) * 20
+  )
+  ctx.stroke()
 }

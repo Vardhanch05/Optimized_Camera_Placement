@@ -1,41 +1,66 @@
-// -------- App State --------
+const canvas = document.getElementById("canvas")
+const ctx = canvas.getContext("2d")
 
-export const AppState = {
-  polygon: [],
-  isClosed: false,
+export function render(state, interaction) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-  cameras: [],              // [{ id, x, y }]
-  selectedCameraId: null,
+  drawPolygon(state.polygon, state.isClosed)
+  drawCameras(state.cameras)
 
-  mode: "draw",             // draw | camera
-  coverageVisible: true
+  if (!state.isClosed && interaction.isDrawing && interaction.previewPoint) {
+    drawPreview(state.polygon, interaction.previewPoint)
+  }
 }
 
-// -------- Interaction (not undoable) --------
+function drawPolygon(points, isClosed) {
+  if (points.length === 0) return
 
-export const InteractionState = {
-  isDrawing: false,
-  previewPoint: null
+  ctx.strokeStyle = "black"
+  ctx.lineWidth = 2
+
+  ctx.beginPath()
+  ctx.moveTo(points[0].x, points[0].y)
+  for (let i = 1; i < points.length; i++) {
+    ctx.lineTo(points[i].x, points[i].y)
+  }
+
+  if (isClosed) {
+    ctx.closePath()
+    ctx.fillStyle = "rgba(200,200,200,0.4)"
+    ctx.fill()
+  }
+
+  ctx.stroke()
+
+  points.forEach((p, i) => {
+    ctx.fillStyle = i === 0 ? "green" : "blue"
+    ctx.beginPath()
+    ctx.arc(p.x, p.y, 5, 0, Math.PI * 2)
+    ctx.fill()
+  })
 }
 
-// -------- History --------
+function drawPreview(points, preview) {
+  if (points.length === 0) return
 
-export const undoStack = []
-export const redoStack = []
+  const last = points[points.length - 1]
 
-export function pushState() {
-  undoStack.push(structuredClone(AppState))
-  redoStack.length = 0
+  ctx.setLineDash([6, 6])
+  ctx.strokeStyle = "#888"
+
+  ctx.beginPath()
+  ctx.moveTo(last.x, last.y)
+  ctx.lineTo(preview.x, preview.y)
+  ctx.stroke()
+
+  ctx.setLineDash([])
 }
 
-export function undo() {
-  if (undoStack.length === 0) return
-  redoStack.push(structuredClone(AppState))
-  Object.assign(AppState, undoStack.pop())
-}
-
-export function redo() {
-  if (redoStack.length === 0) return
-  undoStack.push(structuredClone(AppState))
-  Object.assign(AppState, redoStack.pop())
+function drawCameras(cameras) {
+  cameras.forEach(cam => {
+    ctx.fillStyle = "red"
+    ctx.beginPath()
+    ctx.arc(cam.x, cam.y, 6, 0, Math.PI * 2)
+    ctx.fill()
+  })
 }
