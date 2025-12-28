@@ -7,38 +7,62 @@ import {
 } from "./state.js"
 
 import { render } from "./render.js"
-import { computeCoverage } from "./coverage.js"
 
 const canvas = document.getElementById("canvas")
 const undoBtn = document.getElementById("undoBtn")
 const redoBtn = document.getElementById("redoBtn")
 
+const CLOSE_DISTANCE = 10
+
 function getMousePos(e) {
-  const r = canvas.getBoundingClientRect()
-  return { x: e.clientX - r.left, y: e.clientY - r.top }
+  const rect = canvas.getBoundingClientRect()
+  return {
+    x: e.clientX - rect.left,
+    y: e.clientY - rect.top
+  }
 }
 
-// Initial render
+function distance(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y)
+}
+
 render(AppState, InteractionState)
 
-// Undo / Redo
-undoBtn.onclick = () => { undo(); render(AppState, InteractionState) }
-redoBtn.onclick = () => { redo(); render(AppState, InteractionState) }
+undoBtn.onclick = () => {
+  undo()
+  render(AppState, InteractionState)
+}
 
-// Shift + Click → add camera
-canvas.addEventListener("mousedown", (e) => {
-  if (!AppState.isClosed) return
+redoBtn.onclick = () => {
+  redo()
+  render(AppState, InteractionState)
+}
 
-  if (e.shiftKey) {
-    pushState()
-    const pos = getMousePos(e)
-    AppState.cameras.push({ ...pos, radius: 80 })
+/* CLICK = ADD VERTEX */
+canvas.addEventListener("click", (e) => {
+  if (AppState.isClosed) return
 
-    AppState.coveragePoints = computeCoverage(
-      AppState.polygon,
-      AppState.cameras
-    )
+  const pos = getMousePos(e)
 
-    render(AppState, InteractionState)
+  if (AppState.polygon.length >= 3) {
+    const first = AppState.polygon[0]
+    if (distance(pos, first) < CLOSE_DISTANCE) {
+      pushState()
+      AppState.isClosed = true
+      InteractionState.previewPoint = null
+      render(AppState, InteractionState)
+      return
+    }
   }
+
+  pushState()
+  AppState.polygon.push(pos)
+  render(AppState, InteractionState)
+})
+
+/* MOVE = PREVIEW */
+canvas.addEventListener("mousemove", (e) => {
+  if (AppState.isClosed) return
+  InteractionState.previewPoint = getMousePos(e)
+  render(AppState, InteractionState)
 })
