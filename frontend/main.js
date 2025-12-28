@@ -11,42 +11,29 @@ import { render } from "./render.js"
 const canvas = document.getElementById("canvas")
 const undoBtn = document.getElementById("undoBtn")
 const redoBtn = document.getElementById("redoBtn")
+const cameraBtn = document.getElementById("cameraBtn")
 
 const CLOSE_DISTANCE = 10
 
 function getMousePos(e) {
-  const rect = canvas.getBoundingClientRect()
-  return {
-    x: e.clientX - rect.left,
-    y: e.clientY - rect.top
-  }
+  const r = canvas.getBoundingClientRect()
+  return { x: e.clientX - r.left, y: e.clientY - r.top }
 }
 
 function distance(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y)
 }
 
-// Initial render
 render(AppState, InteractionState)
 
-// Undo / Redo
-undoBtn.onclick = () => {
-  undo()
-  render(AppState, InteractionState)
+undoBtn.onclick = () => { undo(); render(AppState, InteractionState) }
+redoBtn.onclick = () => { redo(); render(AppState, InteractionState) }
+
+cameraBtn.onclick = () => {
+  AppState.mode = "camera"
 }
 
-redoBtn.onclick = () => {
-  redo()
-  render(AppState, InteractionState)
-}
-
-// Toggle mode with keyboard
-window.addEventListener("keydown", (e) => {
-  if (e.key === "c") AppState.mode = "camera"
-  if (e.key === "d") AppState.mode = "draw"
-})
-
-// Mouse down
+// MOUSEDOWN
 canvas.addEventListener("mousedown", (e) => {
   const pos = getMousePos(e)
 
@@ -57,24 +44,20 @@ canvas.addEventListener("mousedown", (e) => {
       id: crypto.randomUUID(),
       x: pos.x,
       y: pos.y,
-      angle: 0,
-      fov: 90,
-      range: 120
+      range: 80
     })
     render(AppState, InteractionState)
     return
   }
 
   // DRAW MODE
-  if (AppState.mode !== "draw" || AppState.isClosed) return
+  if (AppState.isClosed) return
 
   if (AppState.polygon.length >= 3) {
     const first = AppState.polygon[0]
     if (distance(pos, first) < CLOSE_DISTANCE) {
       pushState()
       AppState.isClosed = true
-      InteractionState.isDrawing = false
-      InteractionState.previewPoint = null
       render(AppState, InteractionState)
       return
     }
@@ -82,20 +65,19 @@ canvas.addEventListener("mousedown", (e) => {
 
   pushState()
   AppState.polygon.push(pos)
-
   InteractionState.isDrawing = true
   InteractionState.previewPoint = pos
   render(AppState, InteractionState)
 })
 
-// Mouse move
+// MOUSEMOVE
 canvas.addEventListener("mousemove", (e) => {
   if (!InteractionState.isDrawing || AppState.isClosed) return
   InteractionState.previewPoint = getMousePos(e)
   render(AppState, InteractionState)
 })
 
-// Mouse up
+// MOUSEUP
 canvas.addEventListener("mouseup", () => {
   InteractionState.isDrawing = false
   InteractionState.previewPoint = null
