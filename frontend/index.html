@@ -2,19 +2,149 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Camera Placement Optimizer</title>
-  <link rel="stylesheet" href="styles.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Security Camera Placement Optimizer</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <div class="container">
+    <header>
+      <div class="header-content">
+        <div class="title-section">
+          <svg class="camera-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+            <circle cx="12" cy="13" r="4"></circle>
+          </svg>
+          <div>
+            <h1>Security Camera Placement Optimizer</h1>
+            <p class="subtitle">Design your space and optimize camera placement for maximum coverage</p>
+          </div>
+        </div>
+      </div>
+    </header>
 
-  <header>
-    <button id="undoBtn">Undo</button>
-    <button id="redoBtn">Redo</button>
-    <span>Camera Placement Optimizer</span>
-  </header>
+    <div class="main-content">
+      <div class="canvas-section">
+        <canvas id="canvas" width="900" height="600"></canvas>
+        <div class="status-bar">
+          <div class="status-left">
+            <span class="status-item">Mode: <strong id="modeText">Drawing Polygon</strong></span>
+            <span class="status-item" id="cameraCount" style="display: none;">Cameras: <strong id="cameraCountText">0</strong></span>
+          </div>
+          <div class="status-right">
+            <span class="status-item" id="coverageDisplay" style="display: none;">
+              Coverage: <strong class="coverage-text" id="coverageText">0%</strong>
+            </span>
+          </div>
+        </div>
+      </div>
 
-  <canvas id="canvas" width="900" height="600"></canvas>
+      <div class="control-panel">
+        <!-- Global Settings Section -->
+        <div class="panel-section">
+          <h3 class="panel-title">Global Camera Settings</h3>
+          <div class="settings-group">
+            <div class="setting-item">
+              <label>Default Range: <span id="globalRangeValue">150</span>px</label>
+              <input type="range" id="globalRangeSlider" min="50" max="300" value="150" step="10" class="slider">
+            </div>
+            <div class="setting-item">
+              <label>Default FOV: <span id="globalFovValue">90</span>°</label>
+              <input type="range" id="globalFovSlider" min="30" max="180" value="90" step="5" class="slider">
+            </div>
+            <div class="setting-item">
+              <label>Max Cameras (Auto): <span id="maxCamerasValue">10</span></label>
+              <input type="range" id="maxCamerasSlider" min="1" max="20" value="10" class="slider">
+            </div>
+          </div>
+        </div>
 
-  <script type="module" src="./main.js"></script>
+        <!-- Tools Section -->
+        <div class="panel-section">
+          <h3 class="panel-title">Tools</h3>
+          <div class="button-group">
+            <button id="undoBtn" class="btn btn-secondary" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 7v6h6"></path>
+                <path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13"></path>
+              </svg>
+              Undo
+            </button>
+            <button id="redoBtn" class="btn btn-secondary" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transform: scaleX(-1)">
+                <path d="M3 7v6h6"></path>
+                <path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13"></path>
+              </svg>
+              Redo
+            </button>
+            <button id="toggleCoverageBtn" class="btn btn-primary">
+              <svg id="eyeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+              <span id="toggleCoverageText">Hide Coverage</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Actions Section -->
+        <div class="panel-section">
+          <h3 class="panel-title">Actions</h3>
+          <div class="button-group">
+            <button id="optimizeBtn" class="btn btn-success btn-large" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+              Auto Optimize
+            </button>
+            <button id="deleteCameraBtn" class="btn btn-danger" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+              Delete Camera
+            </button>
+            <button id="clearBtn" class="btn btn-secondary">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+              Clear All
+            </button>
+          </div>
+        </div>
+
+        <!-- Instructions Section -->
+        <div class="panel-section">
+          <h3 class="panel-title">Instructions</h3>
+          <div class="instructions" id="instructions">
+            <p>• Click to add points to your polygon</p>
+            <p>• Click near the first point to close the shape</p>
+          </div>
+        </div>
+
+        <!-- Camera Settings Section -->
+        <div class="panel-section" id="cameraSettings" style="display: none;">
+          <h3 class="panel-title">Selected Camera</h3>
+          <div class="settings-group">
+            <div class="setting-item">
+              <label>Angle: <span id="angleValue">0</span>°</label>
+              <input type="range" id="angleSlider" min="0" max="360" value="0" class="slider">
+            </div>
+            <div class="setting-item">
+              <label>FOV: <span id="fovValue">90</span>°</label>
+              <input type="range" id="fovSlider" min="30" max="180" value="90" class="slider">
+            </div>
+            <div class="setting-item">
+              <label>Range: <span id="rangeValue">150</span>px</label>
+              <input type="range" id="rangeSlider" min="50" max="300" value="150" step="10" class="slider">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="main.js"></script>
 </body>
 </html>

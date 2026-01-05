@@ -1,14 +1,173 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List
+import uvicorn
+
+from optimizer import optimize_camera_placement, calculate_coverage_percentage
 
 app = FastAPI(title="Camera Placement Optimizer API")
 
+# Enable CORS for frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# -------- Request Models --------
+
+class Point(BaseModel):
+    x: float
+    y: float
+
+class Camera(BaseModel):
+    id: float
+    x: float
+    y: float
+    angle: float
+    range: float
+    fov: float
+
+class OptimizeRequest(BaseModel):
+    polygon: List[Point]
+    max_cameras: int = 10
+    camera_range: float = 150.0
+    camera_fov: float = 90.0
+
+class CoverageRequest(BaseModel):
+    polygon: List[Point]
+    cameras: List[Camera]
+
+# -------- Endpoints --------
+
 @app.get("/")
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "message": "Camera Placement Optimizer API is running",
+        "version": "1.0.0"
+    }
 
 @app.post("/optimize")
-def optimize(payload: dict):
-    return {
-        "message": "Optimization not implemented yet",
-        "received_keys": list(payload.keys())
-    }
+def optimize(request: OptimizeRequest):
+    """
+    Optimize camera placement for a given polygon.
+    
+    Args:
+        polygon: List of points defining the area boundary
+        max_cameras: Maximum number of cameras to place (1-20)
+        camera_range: Detection range of each camera in pixels (50-300)
+        camera_fov: Field of view in degrees (30-180)
+    
+    Returns:
+        List of optimally placed cameras with their configurations
+    """
+    try:
+        if len(request.polygon) < 3:
+            raise HTTPException(
+                status_code=400, 
+                detail="Polygon must have at least 3 points"
+            )
+        
+        if not (1 <= request.max_cameras <= 20):
+            raise HTTPException(
+                status_code=400,
+                detail="max_cameras must be between 1 and 20"
+            )
+        
+        if not (50 <= request.camera_range <= 300):
+            raise HTTPException(
+                status_code=400,
+                detail="camera_range must be between 50 and 300"
+            )
+        
+        if not (30 <= request.camera_fov <= 180):
+            raise HTTPException(
+                status_code=400,
+                detail="camera_fov must be between 30 and 180"
+            )
+        
+        polygon_coords = [(p.x, p.y) for p in request.polygon]
+        
+        cameras = optimize_camera_placement(
+            polygon=polygon_coords,
+            max_cameras=request.max_cameras,
+            camera_range=request.camera_range,
+            camera_fov=request.camera_fov
+        )
+        
+        # Calculate coverage for the optimized placement
+        coverage = calculate_coverage_percentage(polygon_coords, cameras)
+        
+        return {
+            "success": True,
+            "cameras": cameras,
+            "num_cameras": len(cameras),
+            "coverage": coverage,
+            "settings": {
+                "max_cameras": request.max_cameras,
+                "camera_range": request.camera_range,
+                "camera_fov": request.camera_fov
+            }
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Optimization error: {str(e)}")
+
+@app.post("/coverage")
+def calculate_coverage(request: CoverageRequest):
+    """
+    Calculate coverage percentage for given cameras and polygon.
+    
+    Args:
+        polygon: List of points defining the area boundary
+        cameras: List of camera positions and orientations
+    
+    Returns:
+        Coverage percentage and detailed statistics
+    """
+    try:
+        if len(request.polygon) < 3:
+            raise HTTPException(
+                status_code=400,
+                detail="Polygon must have at least 3 points"
+            )
+        
+        polygon_coords = [(p.x, p.y) for p in request.polygon]
+        cameras_data = [
+            {
+                'x': c.x,
+                'y': c.y,
+                'angle': c.angle,
+                'range': c.range,
+                'fov': c.fov
+            }
+            for c in request.cameras
+        ]
+        
+        coverage = calculate_coverage_percentage(polygon_coords, cameras_data)
+        
+        return {
+            "success": True,
+            "coverage": coverage,
+            "num_cameras": len(cameras_data),
+            "polygon_points": len(polygon_coords)
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Coverage calculation error: {str(e)}")
+
+# -------- Run Server --------
+
+if __name__ == "__main__":
+    print("🚀 Starting Camera Placement Optimizer API...")
+    print("📍 Server will be available at: http://localhost:8000")
+    print("📚 API documentation: http://localhost:8000/docs")
+    uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -1,34 +1,85 @@
-import { pointInPolygon, distance } from "./geometry.js"
+import { generateGridPoints, isPointInCameraView } from './geometry.js';
 
-export function computeCoverage(polygon, cameras, step = 12) {
-  const points = []
+// -------- Coverage Calculation --------
 
-  let minX = Infinity, minY = Infinity
-  let maxX = -Infinity, maxY = -Infinity
-
-  polygon.forEach(p => {
-    minX = Math.min(minX, p.x)
-    minY = Math.min(minY, p.y)
-    maxX = Math.max(maxX, p.x)
-    maxY = Math.max(maxY, p.y)
-  })
-
-  for (let x = minX; x <= maxX; x += step) {
-    for (let y = minY; y <= maxY; y += step) {
-      const p = { x, y }
-      if (!pointInPolygon(p, polygon)) continue
-
-      let covered = false
-      for (const cam of cameras) {
-        if (distance(p, cam) <= cam.radius) {
-          covered = true
-          break
-        }
-      }
-
-      points.push({ ...p, covered })
+export function calculateCoverage(polygon, cameras, sampleStep = 10) {
+  if (polygon.length === 0 || !cameras) return 0;
+  
+  const points = generateGridPoints(polygon, sampleStep);
+  if (points.length === 0) return 0;
+  
+  let coveredPoints = 0;
+  
+  for (const point of points) {
+    if (isPointCoveredByAnCamera(point, cameras)) {
+      coveredPoints++;
     }
   }
+  
+  return (coveredPoints / points.length * 100).toFixed(1);
+}
 
-  return points
+export function isPointCoveredByAnCamera(point, cameras) {
+  for (const camera of cameras) {
+    if (isPointInCameraView(point, camera)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// -------- Optimization Algorithm --------
+
+export async function optimizeCameraPlacement(polygon, maxCameras = 10, cameraRange = 150, cameraFov = 90) {
+  const candidates = generateGridPoints(polygon, 30);
+  const cameras = [];
+  
+  // Greedy algorithm: iteratively place cameras that cover the most uncovered area
+  for (let iteration = 0; iteration < maxCameras; iteration++) {
+    let bestCamera = null;
+    let bestCoverage = 0;
+    
+    // Try each candidate position with different angles
+    for (const pos of candidates) {
+      for (let angle = 0; angle < 360; angle += 45) {
+        const testCamera = {
+          id: Date.now() + Math.random(),
+          x: pos.x,
+          y: pos.y,
+          angle,
+          range: cameraRange,
+          fov: cameraFov
+        };
+        
+        const testCameras = [...cameras, testCamera];
+        const coverage = calculateNewCoverage(polygon, testCameras);
+        
+        if (coverage > bestCoverage) {
+          bestCoverage = coverage;
+          bestCamera = testCamera;
+        }
+      }
+    }
+    
+    if (bestCamera && bestCoverage > calculateNewCoverage(polygon, cameras)) {
+      cameras.push(bestCamera);
+    } else {
+      break; // No improvement found
+    }
+  }
+  
+  return cameras;
+}
+
+function calculateNewCoverage(polygon, cameras) {
+  const points = generateGridPoints(polygon, 15);
+  let covered = 0;
+  
+  for (const point of points) {
+    if (isPointCoveredByAnCamera(point, cameras)) {
+      covered++;
+    }
+  }
+  
+  return covered;
 }
