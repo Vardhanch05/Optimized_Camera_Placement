@@ -14,7 +14,7 @@ import {
 
 import { render } from "./render.js";
 import { distance, isPointInPolygon } from "./geometry.js";
-import { calculateCoverage, optimizeCameraPlacement } from "./coverage.js";
+import { calculateCoverage } from "./coverage.js";
 
 // -------- DOM Elements --------
 
@@ -27,6 +27,9 @@ const clearBtn = document.getElementById("clearBtn");
 const toggleCoverageBtn = document.getElementById("toggleCoverageBtn");
 const angleSlider = document.getElementById("angleSlider");
 const fovSlider = document.getElementById("fovSlider");
+const globalRangeSlider = document.getElementById("globalRangeSlider");
+const globalFovSlider = document.getElementById("globalFovSlider");
+const maxCamerasSlider = document.getElementById("maxCamerasSlider");
 
 // -------- Constants --------
 
@@ -227,10 +230,42 @@ optimizeBtn.addEventListener("click", async () => {
   
   try {
     pushState();
-    const optimizedCameras = await optimizeCameraPlacement(AppState.polygon);
-    AppState.cameras = optimizedCameras;
-    AppState.selectedCameraId = null;
-    updateUI();
+    // Call backend optimize API
+    const payload = {
+      polygon: AppState.polygon.map(p => ({ x: p.x, y: p.y })),
+      max_cameras: AppState.maxCameras || 10,
+      camera_range: AppState.globalRange || 150,
+      camera_fov: AppState.globalFov || 90
+    };
+
+    const resp = await fetch("http://localhost:8000/optimize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      alert("Optimization failed: " + (err.detail || resp.statusText));
+      return;
+    }
+
+    const data = await resp.json();
+    if (data && data.success && Array.isArray(data.cameras)) {
+      // backend returns cameras as list of {x,y,angle,range,fov,id}
+      AppState.cameras = data.cameras.map(c => ({
+        id: c.id ?? (Date.now() + Math.random()),
+        x: c.x,
+        y: c.y,
+        angle: c.angle ?? 0,
+        range: c.range ?? AppState.globalRange,
+        fov: c.fov ?? AppState.globalFov
+      }));
+      AppState.selectedCameraId = null;
+      updateUI();
+    } else {
+      alert('Optimization returned unexpected response');
+    }
   } finally {
     optimizeBtn.disabled = false;
     optimizeBtn.innerHTML = `
@@ -287,6 +322,30 @@ fovSlider.addEventListener("input", (e) => {
     updateCamera(selectedCamera.id, { fov: parseInt(e.target.value) });
     updateUI();
   }
+});
+
+// Global range slider
+globalRangeSlider.addEventListener("input", (e) => {
+  const val = parseInt(e.target.value, 10);
+  document.getElementById("globalRangeValue").textContent = val;
+  AppState.globalRange = val;
+  updateUI();
+});
+
+// Global FOV slider
+globalFovSlider.addEventListener("input", (e) => {
+  const val = parseInt(e.target.value, 10);
+  document.getElementById("globalFovValue").textContent = val;
+  AppState.globalFov = val;
+  updateUI();
+});
+
+// Max cameras slider
+maxCamerasSlider.addEventListener("input", (e) => {
+  const val = parseInt(e.target.value, 10);
+  document.getElementById("maxCamerasValue").textContent = val;
+  AppState.maxCameras = val;
+  updateUI();
 });
 
 // Keyboard controls
