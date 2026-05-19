@@ -1,5 +1,7 @@
 // -------- Geometry Utilities --------
 
+import { SAMPLE_STEP } from './config.js';
+
 export function distance(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
@@ -57,9 +59,10 @@ export function isPointInCameraView(point, camera) {
 export function generateGridPoints(polygon, step = 10) {
   const bounds = getPolygonBounds(polygon);
   const points = [];
-  
-  for (let x = bounds.minX; x <= bounds.maxX; x += step) {
-    for (let y = bounds.minY; y <= bounds.maxY; y += step) {
+  const actualStep = step || SAMPLE_STEP;
+
+  for (let x = bounds.minX; x <= bounds.maxX; x += actualStep) {
+    for (let y = bounds.minY; y <= bounds.maxY; y += actualStep) {
       const point = { x, y };
       if (isPointInPolygon(point, polygon)) {
         points.push(point);

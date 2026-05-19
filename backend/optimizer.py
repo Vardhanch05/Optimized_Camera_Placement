@@ -1,7 +1,13 @@
 import numpy as np
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Polygon
+from shapely.prepared import prep
 from typing import List, Tuple, Dict
 import math
+
+# Sampling / candidate constants (standardize across codebase)
+SAMPLE_STEP = 10.0            # default fine sampling step (pixels)
+COVERAGE_SAMPLE_STEP = 15.0   # sampling step used for coverage checks during optimization
+CANDIDATE_STEP = 30.0         # candidate grid step for camera positions
 
 def point_in_polygon(point: Tuple[float, float], polygon: List[Tuple[float, float]]) -> bool:
     """Check if a point is inside a polygon using ray casting algorithm."""
@@ -55,62 +61,70 @@ def is_point_in_camera_view(
 
 def generate_sample_points(
     polygon: List[Tuple[float, float]],
-    step: float = 10.0
+    step: float = SAMPLE_STEP
 ) -> List[Tuple[float, float]]:
-    """Generate grid of sample points inside polygon."""
-    xs = [p[0] for p in polygon]
-    ys = [p[1] for p in polygon]
-    
-    min_x, max_x = min(xs), max(xs)
-    min_y, max_y = min(ys), max(ys)
-    
+    """Generate grid of sample points inside polygon using Shapely for robustness.
+
+    This is substantially faster and more reliable than a pure Python
+    ray-casting implementation for larger polygons and edge cases.
+    """
+    poly = Polygon(polygon)
+    if poly.is_empty:
+        return []
+
+    prepared = prep(poly)
+
+    min_x, min_y, max_x, max_y = poly.bounds
+
+    xs = np.arange(min_x, max_x + step, step)
+    ys = np.arange(min_y, max_y + step, step)
+
     points = []
-    x = min_x
-    while x <= max_x:
-        y = min_y
-        while y <= max_y:
-            point = (x, y)
-            if point_in_polygon(point, polygon):
-                points.append(point)
-            y += step
-        x += step
-    
+    # Use shapely Point for contains checks
+    from shapely.geometry import Point as ShapelyPoint
+
+    for x in xs:
+        for y in ys:
+            pt = ShapelyPoint(float(x), float(y))
+            if prepared.contains(pt):
+                points.append((float(x), float(y)))
+
     return points
 
 def calculate_coverage(
     polygon: List[Tuple[float, float]],
     cameras: List[Dict],
-    sample_step: float = 10.0
+    sample_step: float = SAMPLE_STEP
 ) -> int:
     """Calculate number of covered sample points."""
     sample_points = generate_sample_points(polygon, sample_step)
-    
+
     covered = 0
     for point in sample_points:
         for camera in cameras:
             if is_point_in_camera_view(point, camera):
                 covered += 1
                 break
-    
+
     return covered
 
 def calculate_coverage_percentage(
     polygon: List[Tuple[float, float]],
     cameras: List[Dict],
-    sample_step: float = 10.0
+    sample_step: float = SAMPLE_STEP
 ) -> float:
     """Calculate coverage as a percentage."""
     sample_points = generate_sample_points(polygon, sample_step)
     if not sample_points:
         return 0.0
-    
+
     covered = 0
     for point in sample_points:
         for camera in cameras:
             if is_point_in_camera_view(point, camera):
                 covered += 1
                 break
-    
+
     return round(covered / len(sample_points) * 100, 1)
 
 def optimize_camera_placement(
@@ -118,7 +132,7 @@ def optimize_camera_placement(
     max_cameras: int = 10,
     camera_range: float = 150.0,
     camera_fov: float = 90.0,
-    candidate_step: float = 30.0
+    candidate_step: float = CANDIDATE_STEP
 ) -> List[Dict]:
     """
     Optimize camera placement using a greedy algorithm.
@@ -160,14 +174,14 @@ def optimize_camera_placement(
                 
                 # Calculate coverage with this camera added
                 test_cameras = cameras + [test_camera]
-                coverage = calculate_coverage(polygon, test_cameras, sample_step=15.0)
+                coverage = calculate_coverage(polygon, test_cameras, sample_step=COVERAGE_SAMPLE_STEP)
                 
                 if coverage > best_coverage:
                     best_coverage = coverage
                     best_camera = test_camera
         
         # Check if we found an improvement
-        current_coverage = calculate_coverage(polygon, cameras, sample_step=15.0)
+        current_coverage = calculate_coverage(polygon, cameras, sample_step=COVERAGE_SAMPLE_STEP)
         
         if best_camera and best_coverage > current_coverage:
             # Add unique ID

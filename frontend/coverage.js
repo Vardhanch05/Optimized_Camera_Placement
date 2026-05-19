@@ -1,8 +1,9 @@
 import { generateGridPoints, isPointInCameraView } from './geometry.js';
+import { SAMPLE_STEP, COVERAGE_SAMPLE_STEP, CANDIDATE_STEP } from './config.js';
 
 // -------- Coverage Calculation --------
 
-export function calculateCoverage(polygon, cameras, sampleStep = 10) {
+export function calculateCoverage(polygon, cameras, sampleStep = SAMPLE_STEP) {
   if (polygon.length === 0 || !cameras) return 0;
   
   const points = generateGridPoints(polygon, sampleStep);
@@ -31,7 +32,7 @@ export function isPointCoveredByAnCamera(point, cameras) {
 // -------- Optimization Algorithm --------
 
 export async function optimizeCameraPlacement(polygon, maxCameras = 10, cameraRange = 150, cameraFov = 90) {
-  const candidates = generateGridPoints(polygon, 30);
+  const candidates = generateGridPoints(polygon, CANDIDATE_STEP);
   const cameras = [];
   
   // Greedy algorithm: iteratively place cameras that cover the most uncovered area
@@ -72,7 +73,7 @@ export async function optimizeCameraPlacement(polygon, maxCameras = 10, cameraRa
 }
 
 function calculateNewCoverage(polygon, cameras) {
-  const points = generateGridPoints(polygon, 15);
+  const points = generateGridPoints(polygon, COVERAGE_SAMPLE_STEP);
   let covered = 0;
   
   for (const point of points) {

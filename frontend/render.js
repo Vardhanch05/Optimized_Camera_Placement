@@ -1,4 +1,5 @@
 import { distance } from './geometry.js';
+import { GRID_SPACING } from './config.js';
 
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
@@ -9,6 +10,7 @@ const CLOSE_DISTANCE = 15;
 
 export function render(state, interaction) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawGrid();
   
   // Draw polygon
   if (state.polygon.length > 0) {
@@ -37,6 +39,31 @@ export function render(state, interaction) {
   if (state.cameras.length > 0) {
     drawCameras(state.cameras, state.selectedCameraId);
   }
+}
+
+function drawGrid() {
+  const spacing = GRID_SPACING || 25;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(148,163,184,0.08)';
+  ctx.lineWidth = 1;
+
+  // Vertical lines
+  for (let x = 0; x <= canvas.width; x += spacing) {
+    ctx.beginPath();
+    ctx.moveTo(x + 0.5, 0);
+    ctx.lineTo(x + 0.5, canvas.height);
+    ctx.stroke();
+  }
+
+  // Horizontal lines
+  for (let y = 0; y <= canvas.height; y += spacing) {
+    ctx.beginPath();
+    ctx.moveTo(0, y + 0.5);
+    ctx.lineTo(canvas.width, y + 0.5);
+    ctx.stroke();
+  }
+
+  ctx.restore();
 }
 
 // -------- Drawing Functions --------
