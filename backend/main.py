@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List
 import uvicorn
@@ -42,6 +43,15 @@ class CoverageRequest(BaseModel):
     cameras: List[Camera]
 
 # -------- Endpoints --------
+
+# Serve frontend static files so the app can be opened from the same origin.
+# This avoids cross-origin connection issues when the frontend fetches the API.
+import os
+from pathlib import Path
+BASE_DIR = Path(__file__).resolve().parent.parent
+FRONTEND_DIR = BASE_DIR / "frontend"
+if FRONTEND_DIR.exists():
+    app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
 
 @app.get("/")
 def health():
