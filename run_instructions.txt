@@ -21,12 +21,18 @@ Repository layout (important paths)
 
 2) Start the backend API
 
-  python backend/main.py
+  Recommended (use helper to avoid lingering processes):
 
-  The server runs on http://localhost:8000 and Swagger UI is at http://localhost:8000/docs
+    python run_server.py
+
+  The helper will stop any existing Python server on port 8000 (if safe) and start the app.
+
+  Direct start (alternate):
+
+    python backend/main.py
 
   Alternative (uvicorn):
-  uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+    uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 
 3) Serve the frontend (static files)
 
