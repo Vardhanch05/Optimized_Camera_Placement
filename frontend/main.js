@@ -241,7 +241,10 @@ optimizeBtn.addEventListener("click", async () => {
     };
 
     try {
-      const backendUrl = `http://${location.hostname}:8000/optimize`;
+      // Use origin-relative URL so the request goes to the same origin
+      // that served the page. This avoids connection issues when the
+      // frontend is accessed via a forwarded/dev host.
+      const backendUrl = `${location.origin}/optimize`;
       console.log('Sending optimize request to', backendUrl, payload);
 
       const resp = await fetch(backendUrl, {
