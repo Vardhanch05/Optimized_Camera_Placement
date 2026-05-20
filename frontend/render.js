@@ -9,6 +9,16 @@ const CLOSE_DISTANCE = 15;
 // -------- Main Render Function --------
 
 export function render(state, interaction) {
+  // Ensure the canvas drawing buffer matches the displayed size so
+  // mouse coordinates and rendering align. This avoids issues where CSS
+  // scales the element but the canvas bitmap remains at a different size.
+  const cw = Math.max(1, Math.floor(canvas.clientWidth));
+  const ch = Math.max(1, Math.floor(canvas.clientHeight));
+  if (canvas.width !== cw || canvas.height !== ch) {
+    canvas.width = cw;
+    canvas.height = ch;
+  }
+
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawGrid();
   
@@ -44,7 +54,8 @@ export function render(state, interaction) {
 function drawGrid() {
   const spacing = GRID_SPACING || 25;
   ctx.save();
-  ctx.strokeStyle = 'rgba(148,163,184,0.08)';
+  // Slightly stronger grid alpha so it's visible on most backgrounds.
+  ctx.strokeStyle = 'rgba(148,163,184,0.14)';
   ctx.lineWidth = 1;
 
   // Vertical lines
