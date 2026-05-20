@@ -30,11 +30,18 @@ Repository layout (important paths)
 
 3) Serve the frontend (static files)
 
-  # from repo root
-  cd frontend
-  python -m http.server 5500 --bind 127.0.0.1
+  Option A (recommended): Let the backend serve the frontend so API and UI share the same origin.
 
-  Then open http://127.0.0.1:5500 in your browser.
+    python backend/main.py
+
+    Then open http://localhost:8000 in your browser (FastAPI will serve the frontend index).
+
+  Option B (alternate): Serve static frontend separately (still works).
+
+    cd frontend
+    python -m http.server 5500 --bind 127.0.0.1
+
+    Then open http://127.0.0.1:5500 in your browser.
 
 Notes & behavior
 - The frontend is in `frontend/` and uses ES modules; serving via a static server is required (file:// won't work reliably).
