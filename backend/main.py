@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List
 import uvicorn
@@ -50,10 +51,18 @@ import os
 from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
+INDEX_FILE = FRONTEND_DIR / "index.html"
 if FRONTEND_DIR.exists():
-    app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
+    # Mount static assets under /static to avoid capturing API routes.
+    app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
-@app.get("/")
+    # Serve index.html at root so the UI is available at '/'. Use FileResponse
+    # to ensure POST routes (like /optimize) are still handled by FastAPI.
+    @app.get("/")
+    def root_index():
+        return FileResponse(INDEX_FILE)
+
+@app.get("/health")
 def health():
     return {
         "status": "ok",
