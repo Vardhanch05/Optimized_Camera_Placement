@@ -230,6 +230,8 @@ optimizeBtn.addEventListener("click", async () => {
   
   try {
     pushState();
+    console.log('Starting optimization, polygon points:', AppState.polygon.length);
+
     // Call backend optimize API
     const payload = {
       polygon: AppState.polygon.map(p => ({ x: p.x, y: p.y })),
@@ -238,33 +240,44 @@ optimizeBtn.addEventListener("click", async () => {
       camera_fov: AppState.globalFov || 90
     };
 
-    const resp = await fetch("http://localhost:8000/optimize", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
+    try {
+      const backendUrl = `http://${location.hostname}:8000/optimize`;
+      console.log('Sending optimize request to', backendUrl, payload);
 
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      alert("Optimization failed: " + (err.detail || resp.statusText));
-      return;
-    }
+      const resp = await fetch(backendUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
 
-    const data = await resp.json();
-    if (data && data.success && Array.isArray(data.cameras)) {
-      // backend returns cameras as list of {x,y,angle,range,fov,id}
-      AppState.cameras = data.cameras.map(c => ({
-        id: c.id ?? (Date.now() + Math.random()),
-        x: c.x,
-        y: c.y,
-        angle: c.angle ?? 0,
-        range: c.range ?? AppState.globalRange,
-        fov: c.fov ?? AppState.globalFov
-      }));
-      AppState.selectedCameraId = null;
-      updateUI();
-    } else {
-      alert('Optimization returned unexpected response');
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        console.error('Optimize API error', resp.status, err);
+        alert('Optimization failed: ' + (err.detail || resp.statusText || resp.status));
+        return;
+      }
+
+      const data = await resp.json();
+      console.log('Optimize API response', data);
+
+      if (data && data.success && Array.isArray(data.cameras)) {
+        AppState.cameras = data.cameras.map(c => ({
+          id: c.id ?? (Date.now() + Math.random()),
+          x: c.x,
+          y: c.y,
+          angle: c.angle ?? 0,
+          range: c.range ?? AppState.globalRange,
+          fov: c.fov ?? AppState.globalFov
+        }));
+        AppState.selectedCameraId = null;
+        updateUI();
+      } else {
+        console.error('Unexpected optimize response', data);
+        alert('Optimization returned unexpected response');
+      }
+    } catch (fetchErr) {
+      console.error('Network or fetch error during optimization', fetchErr);
+      alert('Network error: could not reach optimizer. Is the backend running?');
     }
   } finally {
     optimizeBtn.disabled = false;
