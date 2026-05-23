@@ -1,0 +1,75 @@
+Run Instructions for Camera Placement Optimizer
+
+Prerequisites
+- Python 3.10+ (recommended). Ensure `pip` is available.
+- A browser to open the frontend (Chrome/Firefox recommended).
+
+Repository layout (important paths)
+- backend/         -- FastAPI backend and optimizer logic
+- frontend/        -- Static frontend (HTML/JS/CSS)
+- run_instructions.txt -- This file
+
+1) Install backend dependencies
+
+  # from repo root
+  pip install -r backend/requirements.txt
+
+  (Optional) create and activate a virtual environment first:
+  python -m venv .venv
+  source .venv/bin/activate
+  pip install -r backend/requirements.txt
+
+2) Start the backend API
+
+  Recommended (use helper to avoid lingering processes):
+
+    python run_server.py
+
+  The helper will stop any existing Python server on port 8000 (if safe) and start the app.
+
+  Direct start (alternate):
+
+    python backend/main.py
+
+  Alternative (uvicorn):
+    uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+
+3) Serve the frontend (static files)
+
+  Option A (recommended): Let the backend serve the frontend so API and UI share the same origin.
+
+    python backend/main.py
+
+    Then open http://localhost:8000 in your browser (FastAPI will serve the frontend index).
+
+  Option B (alternate): Serve static frontend separately (still works).
+
+    cd frontend
+    python -m http.server 5500 --bind 127.0.0.1
+
+    Then open http://127.0.0.1:5500 in your browser.
+
+Notes & behavior
+- The frontend is in `frontend/` and uses ES modules; serving via a static server is required (file:// won't work reliably).
+- The `Auto Optimize` button now calls the backend `/optimize` endpoint (make sure backend is running).
+- CORS is enabled in the backend for local development.
+
+Quick test (curl)
+
+  curl -X POST http://localhost:8000/optimize \
+    -H 'Content-Type: application/json' \
+    -d '{"polygon":[{"x":100,"y":100},{"x":300,"y":100},{"x":300,"y":300},{"x":100,"y":300}],"max_cameras":3,"camera_range":150,"camera_fov":90}'
+
+Troubleshooting
+- If `pip install` fails, ensure system packages for building wheels are present. In many environments the prebuilt wheels for `numpy` and `shapely` are used.
+- If the frontend shows CORS or network errors, confirm backend is running and accessible at `http://localhost:8000` and that you opened the frontend from the served URL (http://127.0.0.1:5500).
+- Check browser developer console for JavaScript errors and the terminal running `python backend/main.py` for server logs.
+
+Development notes
+- Branch with these improvements: `improve/optimizer-shapely` (current work branch).
+- To revert to client-side optimization or to remove duplication, consider removing `optimizeCameraPlacement` from `frontend/coverage.js` and keeping the backend as single source of truth.
+
+Stopping the servers
+- Press Ctrl+C in the terminal where `python backend/main.py` or `python -m http.server` is running.
+
+If you want, I can: add a Dockerfile, add CI, or create a one-command script to run both services.

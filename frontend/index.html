@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" href="data:," />
+  <!-- Ensure assets load from /static when backend serves frontend under /static -->
+  <base href="/static/">
   <title>Security Camera Placement Optimizer</title>
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -56,6 +59,20 @@
               <label>Max Cameras (Auto): <span id="maxCamerasValue">10</span></label>
               <input type="range" id="maxCamerasSlider" min="1" max="20" value="10" class="slider">
             </div>
+          </div>
+        </div>
+
+        <div class="panel-section">
+          <h3 class="panel-title">Priority Zones</h3>
+          <div class="settings-group">
+            <div class="setting-item">
+              <label for="priorityZonesInput">Weighted rectangles for doors/corridors</label>
+              <textarea id="priorityZonesInput" class="zones-input" rows="8" spellcheck="false" placeholder='[
+  {"x": 180, "y": 120, "width": 140, "height": 60, "weight": 3, "label": "Door"},
+  {"x": 320, "y": 210, "width": 200, "height": 70, "weight": 2, "label": "Corridor"}
+]'></textarea>
+            </div>
+            <p class="zone-help">Use canvas coordinates. Higher weight means the optimizer will favor coverage there first.</p>
           </div>
         </div>
 
@@ -120,6 +137,7 @@
           <div class="instructions" id="instructions">
             <p>• Click to add points to your polygon</p>
             <p>• Click near the first point to close the shape</p>
+            <p>• Define weighted rectangles to prioritize doors or corridors</p>
           </div>
         </div>
 

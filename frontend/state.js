@@ -4,6 +4,7 @@ export const AppState = {
   polygon: [],            // [{x, y}]
   isClosed: false,
   cameras: [],            // [{id, x, y, angle, range, fov}]
+  priorityZones: [],      // [{x, y, width, height, weight, label}]
   selectedCameraId: null,
   mode: "draw",           // "draw" or "place"
   coverageVisible: true,

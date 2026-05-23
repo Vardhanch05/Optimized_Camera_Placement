@@ -1,4 +1,5 @@
 import { distance } from './geometry.js';
+import { GRID_SPACING } from './config.js';
 
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
@@ -8,7 +9,22 @@ const CLOSE_DISTANCE = 15;
 // -------- Main Render Function --------
 
 export function render(state, interaction) {
+  // Ensure the canvas drawing buffer matches the displayed size so
+  // mouse coordinates and rendering align. This avoids issues where CSS
+  // scales the element but the canvas bitmap remains at a different size.
+  const cw = Math.max(1, Math.floor(canvas.clientWidth));
+  const ch = Math.max(1, Math.floor(canvas.clientHeight));
+  if (canvas.width !== cw || canvas.height !== ch) {
+    canvas.width = cw;
+    canvas.height = ch;
+  }
+
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawGrid();
+
+  if (state.priorityZones && state.priorityZones.length > 0) {
+    drawPriorityZones(state.priorityZones);
+  }
   
   // Draw polygon
   if (state.polygon.length > 0) {
@@ -37,6 +53,32 @@ export function render(state, interaction) {
   if (state.cameras.length > 0) {
     drawCameras(state.cameras, state.selectedCameraId);
   }
+}
+
+function drawGrid() {
+  const spacing = GRID_SPACING || 25;
+  ctx.save();
+  // Slightly stronger grid alpha so it's visible on most backgrounds.
+  ctx.strokeStyle = 'rgba(148,163,184,0.14)';
+  ctx.lineWidth = 1;
+
+  // Vertical lines
+  for (let x = 0; x <= canvas.width; x += spacing) {
+    ctx.beginPath();
+    ctx.moveTo(x + 0.5, 0);
+    ctx.lineTo(x + 0.5, canvas.height);
+    ctx.stroke();
+  }
+
+  // Horizontal lines
+  for (let y = 0; y <= canvas.height; y += spacing) {
+    ctx.beginPath();
+    ctx.moveTo(0, y + 0.5);
+    ctx.lineTo(canvas.width, y + 0.5);
+    ctx.stroke();
+  }
+
+  ctx.restore();
 }
 
 // -------- Drawing Functions --------
@@ -96,6 +138,41 @@ function drawClosingIndicator(point) {
   ctx.beginPath();
   ctx.arc(point.x, point.y, 12, 0, Math.PI * 2);
   ctx.stroke();
+}
+
+function drawPriorityZones(priorityZones) {
+  priorityZones.forEach((zone, index) => {
+    const weight = Number(zone.weight ?? 1);
+    const intensity = Math.min(0.08 + Math.max(weight - 1, 0) * 0.08, 0.34);
+    const borderAlpha = Math.min(0.35 + Math.max(weight - 1, 0) * 0.12, 0.85);
+    const x = Math.min(zone.x, zone.x + zone.width);
+    const y = Math.min(zone.y, zone.y + zone.height);
+    const width = Math.abs(zone.width);
+    const height = Math.abs(zone.height);
+
+    ctx.save();
+    ctx.fillStyle = `rgba(245, 158, 11, ${intensity})`;
+    ctx.strokeStyle = `rgba(245, 158, 11, ${borderAlpha})`;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.fillRect(x, y, width, height);
+    ctx.strokeRect(x, y, width, height);
+
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(17, 24, 39, 0.9)';
+    ctx.font = '12px sans-serif';
+    const label = zone.label || `Priority ${index + 1}`;
+    const text = `${label} x${weight.toFixed(1)}`;
+    const paddingX = 8;
+    const paddingY = 6;
+    const textWidth = ctx.measureText(text).width;
+    const labelX = x + 8;
+    const labelY = y + 8;
+    ctx.fillRect(labelX - paddingX, labelY - 12, textWidth + paddingX * 2, 22);
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillText(text, labelX, labelY + 3);
+    ctx.restore();
+  });
 }
 
 function drawCoverageAreas(cameras) {
