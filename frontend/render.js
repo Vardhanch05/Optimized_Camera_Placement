@@ -21,6 +21,10 @@ export function render(state, interaction) {
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawGrid();
+
+  if (state.priorityZones && state.priorityZones.length > 0) {
+    drawPriorityZones(state.priorityZones);
+  }
   
   // Draw polygon
   if (state.polygon.length > 0) {
@@ -134,6 +138,41 @@ function drawClosingIndicator(point) {
   ctx.beginPath();
   ctx.arc(point.x, point.y, 12, 0, Math.PI * 2);
   ctx.stroke();
+}
+
+function drawPriorityZones(priorityZones) {
+  priorityZones.forEach((zone, index) => {
+    const weight = Number(zone.weight ?? 1);
+    const intensity = Math.min(0.08 + Math.max(weight - 1, 0) * 0.08, 0.34);
+    const borderAlpha = Math.min(0.35 + Math.max(weight - 1, 0) * 0.12, 0.85);
+    const x = Math.min(zone.x, zone.x + zone.width);
+    const y = Math.min(zone.y, zone.y + zone.height);
+    const width = Math.abs(zone.width);
+    const height = Math.abs(zone.height);
+
+    ctx.save();
+    ctx.fillStyle = `rgba(245, 158, 11, ${intensity})`;
+    ctx.strokeStyle = `rgba(245, 158, 11, ${borderAlpha})`;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.fillRect(x, y, width, height);
+    ctx.strokeRect(x, y, width, height);
+
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(17, 24, 39, 0.9)';
+    ctx.font = '12px sans-serif';
+    const label = zone.label || `Priority ${index + 1}`;
+    const text = `${label} x${weight.toFixed(1)}`;
+    const paddingX = 8;
+    const paddingY = 6;
+    const textWidth = ctx.measureText(text).width;
+    const labelX = x + 8;
+    const labelY = y + 8;
+    ctx.fillRect(labelX - paddingX, labelY - 12, textWidth + paddingX * 2, 22);
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillText(text, labelX, labelY + 3);
+    ctx.restore();
+  });
 }
 
 function drawCoverageAreas(cameras) {

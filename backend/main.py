@@ -2,11 +2,14 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List
 import uvicorn
 
-from optimizer import optimize_camera_placement, calculate_coverage_percentage
+try:
+    from .optimizer import optimize_camera_placement, calculate_coverage_percentage
+except ImportError:
+    from optimizer import optimize_camera_placement, calculate_coverage_percentage
 
 app = FastAPI(title="Camera Placement Optimizer API")
 
@@ -33,15 +36,25 @@ class Camera(BaseModel):
     range: float
     fov: float
 
+class PriorityZone(BaseModel):
+    x: float
+    y: float
+    width: float
+    height: float
+    weight: float = 1.0
+    label: str | None = None
+
 class OptimizeRequest(BaseModel):
     polygon: List[Point]
     max_cameras: int = 10
     camera_range: float = 150.0
     camera_fov: float = 90.0
+    priority_zones: List[PriorityZone] = Field(default_factory=list)
 
 class CoverageRequest(BaseModel):
     polygon: List[Point]
     cameras: List[Camera]
+    priority_zones: List[PriorityZone] = Field(default_factory=list)
 
 # -------- Endpoints --------
 
@@ -115,11 +128,16 @@ def optimize(request: OptimizeRequest):
             polygon=polygon_coords,
             max_cameras=request.max_cameras,
             camera_range=request.camera_range,
-            camera_fov=request.camera_fov
+            camera_fov=request.camera_fov,
+            priority_zones=[zone.model_dump() for zone in request.priority_zones],
         )
         
         # Calculate coverage for the optimized placement
-        coverage = calculate_coverage_percentage(polygon_coords, cameras)
+        coverage = calculate_coverage_percentage(
+            polygon_coords,
+            cameras,
+            priority_zones=[zone.model_dump() for zone in request.priority_zones],
+        )
         
         return {
             "success": True,
@@ -169,7 +187,11 @@ def calculate_coverage(request: CoverageRequest):
             for c in request.cameras
         ]
         
-        coverage = calculate_coverage_percentage(polygon_coords, cameras_data)
+        coverage = calculate_coverage_percentage(
+            polygon_coords,
+            cameras_data,
+            priority_zones=[zone.model_dump() for zone in request.priority_zones],
+        )
         
         return {
             "success": True,

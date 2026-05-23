@@ -27,13 +27,61 @@ const clearBtn = document.getElementById("clearBtn");
 const toggleCoverageBtn = document.getElementById("toggleCoverageBtn");
 const angleSlider = document.getElementById("angleSlider");
 const fovSlider = document.getElementById("fovSlider");
+const rangeSlider = document.getElementById("rangeSlider");
 const globalRangeSlider = document.getElementById("globalRangeSlider");
 const globalFovSlider = document.getElementById("globalFovSlider");
 const maxCamerasSlider = document.getElementById("maxCamerasSlider");
+const priorityZonesInput = document.getElementById("priorityZonesInput");
 
 // -------- Constants --------
 
 const CLOSE_DISTANCE = 15;
+
+function parsePriorityZonesInput() {
+  const raw = priorityZonesInput.value.trim();
+
+  if (!raw) {
+    priorityZonesInput.classList.remove("input-error");
+    AppState.priorityZones = [];
+    return true;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+
+    if (!Array.isArray(parsed)) {
+      throw new Error("Priority zones must be a JSON array");
+    }
+
+    const zones = parsed.map((zone, index) => {
+      const parsedX = Number(zone.x);
+      const parsedY = Number(zone.y);
+      const parsedWidth = Number(zone.width);
+      const parsedHeight = Number(zone.height);
+      const parsedWeight = Number(zone.weight ?? 1);
+
+      if (!Number.isFinite(parsedX) || !Number.isFinite(parsedY) || !Number.isFinite(parsedWidth) || !Number.isFinite(parsedHeight)) {
+        throw new Error(`Zone ${index + 1} must include numeric x, y, width, and height`);
+      }
+
+      return {
+        x: parsedX,
+        y: parsedY,
+        width: parsedWidth,
+        height: parsedHeight,
+        weight: Number.isFinite(parsedWeight) && parsedWeight > 0 ? parsedWeight : 1,
+        label: typeof zone.label === "string" && zone.label.trim() ? zone.label.trim() : `Zone ${index + 1}`
+      };
+    });
+
+    AppState.priorityZones = zones;
+    priorityZonesInput.classList.remove("input-error");
+    return true;
+  } catch (error) {
+    priorityZonesInput.classList.add("input-error");
+    return false;
+  }
+}
 
 // -------- Helper Functions --------
 
@@ -66,7 +114,7 @@ function updateUI() {
   
   // Update coverage
   if (AppState.isClosed) {
-    const coverage = calculateCoverage(AppState.polygon, AppState.cameras);
+    const coverage = calculateCoverage(AppState.polygon, AppState.cameras, undefined, AppState.priorityZones);
     document.getElementById("coverageDisplay").style.display = "block";
     document.getElementById("coverageText").textContent = coverage + "%";
   } else {
@@ -98,8 +146,10 @@ function updateUI() {
     cameraSettings.style.display = "block";
     angleSlider.value = selectedCamera.angle;
     fovSlider.value = selectedCamera.fov;
+    rangeSlider.value = selectedCamera.range;
     document.getElementById("angleValue").textContent = Math.round(selectedCamera.angle);
     document.getElementById("fovValue").textContent = selectedCamera.fov;
+    document.getElementById("rangeValue").textContent = selectedCamera.range;
   } else {
     cameraSettings.style.display = "none";
   }
@@ -224,6 +274,11 @@ redoBtn.addEventListener("click", () => {
 // Optimize button
 optimizeBtn.addEventListener("click", async () => {
   if (!AppState.isClosed) return;
+
+  if (!parsePriorityZonesInput()) {
+    alert("Priority zones must be valid JSON before optimizing.");
+    return;
+  }
   
   optimizeBtn.disabled = true;
   optimizeBtn.textContent = "Optimizing...";
@@ -237,7 +292,8 @@ optimizeBtn.addEventListener("click", async () => {
       polygon: AppState.polygon.map(p => ({ x: p.x, y: p.y })),
       max_cameras: AppState.maxCameras || 10,
       camera_range: AppState.globalRange || 150,
-      camera_fov: AppState.globalFov || 90
+      camera_fov: AppState.globalFov || 90,
+      priority_zones: AppState.priorityZones
     };
 
     try {
@@ -264,6 +320,26 @@ optimizeBtn.addEventListener("click", async () => {
       console.log('Optimize API response', data);
 
       if (data && data.success && Array.isArray(data.cameras)) {
+        if (data.settings) {
+          if (Number.isFinite(data.settings.max_cameras)) {
+            AppState.maxCameras = data.settings.max_cameras;
+            maxCamerasSlider.value = String(data.settings.max_cameras);
+            document.getElementById("maxCamerasValue").textContent = data.settings.max_cameras;
+          }
+
+          if (Number.isFinite(data.settings.camera_range)) {
+            AppState.globalRange = data.settings.camera_range;
+            globalRangeSlider.value = String(data.settings.camera_range);
+            document.getElementById("globalRangeValue").textContent = data.settings.camera_range;
+          }
+
+          if (Number.isFinite(data.settings.camera_fov)) {
+            AppState.globalFov = data.settings.camera_fov;
+            globalFovSlider.value = String(data.settings.camera_fov);
+            document.getElementById("globalFovValue").textContent = data.settings.camera_fov;
+          }
+        }
+
         AppState.cameras = data.cameras.map(c => ({
           id: c.id ?? (Date.now() + Math.random()),
           x: c.x,
@@ -308,10 +384,13 @@ clearBtn.addEventListener("click", () => {
     pushState();
     AppState.polygon = [];
     AppState.cameras = [];
+    AppState.priorityZones = [];
     AppState.isClosed = false;
     AppState.mode = "draw";
     AppState.selectedCameraId = null;
     InteractionState.previewPoint = null;
+    priorityZonesInput.value = "";
+    priorityZonesInput.classList.remove("input-error");
     updateUI();
   }
 });
@@ -340,6 +419,15 @@ fovSlider.addEventListener("input", (e) => {
   }
 });
 
+// Camera range slider
+rangeSlider.addEventListener("input", (e) => {
+  const selectedCamera = getSelectedCamera();
+  if (selectedCamera) {
+    updateCamera(selectedCamera.id, { range: parseInt(e.target.value, 10) });
+    updateUI();
+  }
+});
+
 // Global range slider
 globalRangeSlider.addEventListener("input", (e) => {
   const val = parseInt(e.target.value, 10);
@@ -361,6 +449,11 @@ maxCamerasSlider.addEventListener("input", (e) => {
   const val = parseInt(e.target.value, 10);
   document.getElementById("maxCamerasValue").textContent = val;
   AppState.maxCameras = val;
+  updateUI();
+});
+
+priorityZonesInput.addEventListener("input", () => {
+  parsePriorityZonesInput();
   updateUI();
 });
 
