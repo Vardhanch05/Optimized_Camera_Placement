@@ -1,8 +1,8 @@
 import cv2
 import numpy as np
+from typing import List, Dict, Tuple
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
-from typing import List, Dict, Tuple
 
 
 def validate_image(image: np.ndarray) -> None:
@@ -81,6 +81,10 @@ def detect_contours(binary: np.ndarray) -> List[np.ndarray]:
 
 
 def extract_polygons(contours: List[np.ndarray], image_shape: Tuple[int, int]) -> Dict[str, List[List[Tuple[float, float]]]]:
+    """
+    Convert contours to shapely Polygons, merge and return outer + inner polygons.
+    This function expects Shapely to be available (imported at module top).
+    """
     polygons = []
     for c in contours:
         peri = cv2.arcLength(c, True)
@@ -122,6 +126,8 @@ def extract_polygons(contours: List[np.ndarray], image_shape: Tuple[int, int]) -
         # Keep as inner if inside outer
         if outer.contains(p) or outer.intersects(p):
             inners.append(p)
+
+    # Shapely extraction path used
 
     def coords_from_poly(p: Polygon):
         return [[float(x), float(y)] for x, y in list(p.exterior.coords)]
