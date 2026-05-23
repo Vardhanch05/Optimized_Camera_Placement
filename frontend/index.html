@@ -80,6 +80,10 @@
         <div class="panel-section">
           <h3 class="panel-title">Tools</h3>
           <div class="button-group">
+            <div class="setting-item">
+              <label for="extractUpload">Upload Floor Plan</label>
+              <input type="file" id="extractUpload" accept="image/png, image/jpeg, image/webp" class="file-input">
+            </div>
             <button id="undoBtn" class="btn btn-secondary" disabled>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M3 7v6h6"></path>
@@ -128,6 +132,16 @@
               </svg>
               Clear All
             </button>
+          </div>
+        </div>
+
+        <!-- Extraction Review Panel (hidden by default) -->
+        <div class="panel-section extraction-panel" id="extractionPanel" style="display: none;">
+          <h3 class="panel-title">Extraction Review</h3>
+          <div id="extractionWarnings" class="extraction-warnings" style="display:none;"></div>
+          <div class="button-group">
+            <button id="confirmExtractionBtn" class="btn btn-success">Confirm</button>
+            <button id="rejectExtractionBtn" class="btn btn-secondary">Reject / Redraw</button>
           </div>
         </div>
 

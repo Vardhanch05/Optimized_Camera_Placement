@@ -14,6 +14,12 @@ export const AppState = {
   maxCameras: 10
 };
 
+// Extraction UI state
+AppState.extractedImage = null; // HTMLImageElement
+AppState.extractionPending = false;
+AppState.extractionWarnings = [];
+AppState.isReviewingExtraction = false;
+
 // -------- Interaction State (not undoable) --------
 
 export const InteractionState = {

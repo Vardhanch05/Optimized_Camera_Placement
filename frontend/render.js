@@ -20,6 +20,18 @@ export function render(state, interaction) {
   }
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // If there's an extracted image, draw it as a background layer scaled to canvas
+  if (state.extractedImage) {
+    try {
+      ctx.save();
+      ctx.globalAlpha = 0.95;
+      ctx.drawImage(state.extractedImage, 0, 0, canvas.width, canvas.height);
+      ctx.restore();
+    } catch (e) {
+      // ignore image draw errors
+    }
+  }
+
   drawGrid();
 
   if (state.priorityZones && state.priorityZones.length > 0) {
@@ -28,6 +40,11 @@ export function render(state, interaction) {
   
   // Draw polygon
   if (state.polygon.length > 0) {
+    // If we're reviewing an extracted polygon, draw it distinctly
+    if (state.isReviewingExtraction && state._extractionResult && Array.isArray(state._extractionResult.outer_polygon)) {
+      const ext = state._extractionResult.outer_polygon.map(p => ({ x: p[0], y: p[1] }));
+      drawExtractedPolygon(ext);
+    }
     drawPolygon(state.polygon, state.isClosed);
   }
   
@@ -53,6 +70,20 @@ export function render(state, interaction) {
   if (state.cameras.length > 0) {
     drawCameras(state.cameras, state.selectedCameraId);
   }
+}
+
+function drawExtractedPolygon(points) {
+  if (!points || points.length === 0) return;
+  ctx.save();
+  ctx.setLineDash([6, 6]);
+  ctx.strokeStyle = 'rgba(96,165,250,0.95)';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawGrid() {
