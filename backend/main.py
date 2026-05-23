@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -10,6 +10,13 @@ try:
     from .optimizer import optimize_camera_placement, calculate_coverage_percentage
 except ImportError:
     from optimizer import optimize_camera_placement, calculate_coverage_percentage
+
+try:
+    from .extract_models import ExtractionResponse, PriorityZone as ExtractPriorityZone
+    from .extractor import extract_layout
+except ImportError:
+    from extract_models import ExtractionResponse, PriorityZone as ExtractPriorityZone
+    from extractor import extract_layout
 
 app = FastAPI(title="Camera Placement Optimizer API")
 
@@ -204,6 +211,60 @@ def calculate_coverage(request: CoverageRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Coverage calculation error: {str(e)}")
+
+
+@app.post("/extract", response_model=ExtractionResponse)
+def extract(file: UploadFile = File(...)):
+    """
+    Extract floor-plan layout from uploaded image.
+    Accepts multipart file upload (PNG, JPEG, WEBP), max 10MB.
+    """
+    try:
+        if file.content_type not in ("image/png", "image/jpeg", "image/webp"):
+            raise HTTPException(status_code=400, detail="Unsupported file type. Allowed: PNG, JPEG, WEBP")
+
+        # Read contents and validate size
+        contents = file.file.read()
+        if not contents:
+            raise HTTPException(status_code=400, detail="Empty file uploaded")
+
+        if len(contents) > 10 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="File too large. Max 10MB")
+
+        try:
+            import numpy as np
+            import cv2
+        except Exception:
+            raise HTTPException(status_code=500, detail="Server missing image dependencies (cv2). Install required packages")
+
+        nparr = np.frombuffer(contents, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        result = extract_layout(img)
+
+        # Map suggested priority zones to model type if needed
+        zones = []
+        for z in result.get("suggested_priority_zones", []):
+            try:
+                zp = ExtractPriorityZone(**z)
+                zones.append(zp)
+            except Exception:
+                # keep as raw dict if conversion fails
+                pass
+
+        return {
+            "outer_polygon": result.get("outer_polygon", []),
+            "inner_polygons": result.get("inner_polygons", []),
+            "suggested_priority_zones": result.get("suggested_priority_zones", []),
+            "canvas_width": int(result.get("canvas_width", 800)),
+            "canvas_height": int(result.get("canvas_height", 600)),
+            "warnings": result.get("warnings", [])
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Extraction error: {str(e)}")
 
 # -------- Run Server --------
 
