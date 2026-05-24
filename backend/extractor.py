@@ -9,13 +9,25 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def validate_image(image: np.ndarray) -> None:
+def validate_image(image: np.ndarray) -> np.ndarray:
     if image is None:
         raise ValueError("Image could not be decoded")
     if image.size == 0:
         raise ValueError("Empty image")
     if len(image.shape) < 2:
         raise ValueError("Unsupported image shape")
+
+    height, width = image.shape[:2]
+    if height < 100 or width < 100:
+        raise ValueError("Image too small to process — minimum size is 100x100")
+
+    if height > 4000 or width > 4000:
+        scale = 4000.0 / max(height, width)
+        new_width = max(1, int(round(width * scale)))
+        new_height = max(1, int(round(height * scale)))
+        image = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
+
+    return image
 
 
 def preprocess(image: np.ndarray, warnings: Optional[List[str]] = None) -> np.ndarray:
@@ -284,7 +296,7 @@ def generate_warnings(image: np.ndarray, polygons: Dict[str, List]) -> List[str]
 def extract_layout(image: np.ndarray, canvas_width: int = 800, canvas_height: int = 600) -> Dict:
     warnings: List[str] = []
     try:
-        validate_image(image)
+        image = validate_image(image)
     except ValueError as e:
         return {
             "outer_polygon": [],
