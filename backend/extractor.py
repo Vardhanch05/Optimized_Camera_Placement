@@ -307,6 +307,40 @@ def extract_layout(image: np.ndarray, canvas_width: int = 800, canvas_height: in
         # Re-run preprocessing on deskewed image
         bin_pre = preprocess(deskewed, warnings)
 
+        # Blank / near-blank detection: count dark pixels (0 values)
+        try:
+            h2, w2 = bin_pre.shape[:2]
+            total_px = float(h2 * w2)
+            nonzero = int(cv2.countNonZero(bin_pre))
+            # Determine minority pixel count (object pixels) regardless of polarity
+            dark_count = min(nonzero, int(total_px) - nonzero)
+        except Exception:
+            dark_count = 0
+            total_px = 1.0
+
+        # Measure high-frequency content to avoid flagging images with edges
+        try:
+            gray_deskew = cv2.cvtColor(deskewed, cv2.COLOR_BGR2GRAY)
+            gray_std_deskew = float(np.std(gray_deskew))
+            mean_abs_lap_deskew = float(np.mean(np.abs(cv2.Laplacian(gray_deskew, cv2.CV_64F))))
+        except Exception:
+            gray_std_deskew = 0.0
+            mean_abs_lap_deskew = 0.0
+
+        # Only treat as blank if minority pixel count is very small and the image is nearly uniform.
+        if dark_count < 0.005 * total_px and gray_std_deskew < 2.0 and mean_abs_lap_deskew < 5.0:
+            # Treat as blank/near-blank: return empty polygons and warning
+            warnings.append("No room boundary detected — please draw the polygon manually")
+            warnings = list(dict.fromkeys(warnings))
+            return {
+                "outer_polygon": [],
+                "inner_polygons": [],
+                "suggested_priority_zones": [],
+                "canvas_width": canvas_width,
+                "canvas_height": canvas_height,
+                "warnings": warnings
+            }
+
         contours = detect_contours(bin_pre, warnings)
         polygons = extract_polygons(contours, deskewed.shape[:2], warnings)
         scaled = scale_to_canvas(polygons, deskewed.shape[:2], canvas_width=canvas_width, canvas_height=canvas_height)
@@ -315,6 +349,7 @@ def extract_layout(image: np.ndarray, canvas_width: int = 800, canvas_height: in
 
         # If no outer polygon found, return empty and a user-facing warning
         if not scaled.get("outer_polygon"):
+            warnings = list(dict.fromkeys(warnings))
             return {
                 "outer_polygon": [],
                 "inner_polygons": [],
@@ -323,6 +358,9 @@ def extract_layout(image: np.ndarray, canvas_width: int = 800, canvas_height: in
                 "canvas_height": canvas_height,
                 "warnings": warnings
             }
+
+        # Deduplicate warnings while preserving order
+        warnings = list(dict.fromkeys(warnings))
 
         return {
             "outer_polygon": scaled.get("outer_polygon", []),
