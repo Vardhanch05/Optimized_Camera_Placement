@@ -15,6 +15,17 @@ import {
 import { render } from "./render.js";
 import { distance, isPointInPolygon } from "./geometry.js";
 import { calculateCoverage } from "./coverage.js";
+import {
+  uploadAndExtract,
+  confirmExtraction,
+  rejectExtraction,
+  isInReviewMode,
+  beginReviewVertexDrag,
+  updateReviewVertexDrag,
+  endReviewVertexDrag,
+  insertReviewVertexAtPoint,
+  deleteReviewVertexAtPoint
+} from "./extractor_ui.js";
 
 // -------- DOM Elements --------
 
@@ -32,6 +43,13 @@ const globalRangeSlider = document.getElementById("globalRangeSlider");
 const globalFovSlider = document.getElementById("globalFovSlider");
 const maxCamerasSlider = document.getElementById("maxCamerasSlider");
 const priorityZonesInput = document.getElementById("priorityZonesInput");
+const extractBtn = document.getElementById("extractBtn");
+const extractUpload = document.getElementById("extractUpload");
+const extractionPanel = document.getElementById("extractionPanel");
+const extractionLoading = document.getElementById("extractionLoading");
+const extractionWarnings = document.getElementById("extractionWarnings");
+const confirmExtractionBtn = document.getElementById("confirmExtractionBtn");
+const rejectExtractionBtn = document.getElementById("rejectExtractionBtn");
 
 // -------- Constants --------
 
@@ -94,25 +112,25 @@ function getMousePos(e) {
 }
 
 function updateUI() {
-  // Update buttons
   undoBtn.disabled = !canUndo();
   redoBtn.disabled = !canRedo();
-  optimizeBtn.disabled = !AppState.isClosed;
+  optimizeBtn.disabled = !AppState.isClosed || AppState.isReviewingExtraction;
   deleteCameraBtn.disabled = AppState.selectedCameraId === null;
-  
-  // Update mode text
-  document.getElementById("modeText").textContent = 
-    AppState.mode === "draw" ? "Drawing Polygon" : "Placing Cameras";
-  
-  // Update camera count
+
+  const modeText = document.getElementById("modeText");
+  if (AppState.isReviewingExtraction) {
+    modeText.textContent = "Reviewing Extraction";
+  } else {
+    modeText.textContent = AppState.mode === "draw" ? "Drawing Polygon" : "Placing Cameras";
+  }
+
   if (AppState.isClosed) {
     document.getElementById("cameraCount").style.display = "block";
     document.getElementById("cameraCountText").textContent = AppState.cameras.length;
   } else {
     document.getElementById("cameraCount").style.display = "none";
   }
-  
-  // Update coverage
+
   if (AppState.isClosed) {
     const coverage = calculateCoverage(AppState.polygon, AppState.cameras, undefined, AppState.priorityZones);
     document.getElementById("coverageDisplay").style.display = "block";
@@ -120,13 +138,20 @@ function updateUI() {
   } else {
     document.getElementById("coverageDisplay").style.display = "none";
   }
-  
-  // Update instructions
+
   const instructions = document.getElementById("instructions");
-  if (!AppState.isClosed) {
+  if (AppState.isReviewingExtraction) {
+    instructions.innerHTML = `
+      <p>• Drag a vertex to adjust the extracted outline</p>
+      <p>• Click an edge to insert a new vertex</p>
+      <p>• Right-click a vertex to delete it</p>
+      <p>• Confirm when the outline looks correct</p>
+    `;
+  } else if (!AppState.isClosed) {
     instructions.innerHTML = `
       <p>• Click to add points to your polygon</p>
       <p>• Click near the first point to close the shape</p>
+      <p>• Define weighted rectangles to prioritize doors or corridors</p>
     `;
   } else {
     instructions.innerHTML = `
@@ -137,12 +162,11 @@ function updateUI() {
       <p>• Click "Auto Optimize" for smart placement</p>
     `;
   }
-  
-  // Update camera settings panel
+
   const cameraSettings = document.getElementById("cameraSettings");
   const selectedCamera = getSelectedCamera();
-  
-  if (selectedCamera) {
+
+  if (selectedCamera && !AppState.isReviewingExtraction) {
     cameraSettings.style.display = "block";
     angleSlider.value = selectedCamera.angle;
     fovSlider.value = selectedCamera.fov;
@@ -153,22 +177,44 @@ function updateUI() {
   } else {
     cameraSettings.style.display = "none";
   }
-  
-  // Update coverage toggle button
-  document.getElementById("toggleCoverageText").textContent = 
+
+  document.getElementById("toggleCoverageText").textContent =
     AppState.coverageVisible ? "Hide Coverage" : "Show Coverage";
-  
-  // Render canvas
+
+  if (extractionPanel) {
+    extractionPanel.style.display = AppState.isReviewingExtraction || AppState.extractionPending ? "block" : "none";
+  }
+
+  if (extractionLoading) {
+    extractionLoading.style.display = AppState.extractionPending ? "flex" : "none";
+  }
+
+  if (extractionWarnings) {
+    const warnings = Array.isArray(AppState.extractionWarnings) ? AppState.extractionWarnings : [];
+    if (warnings.length > 0) {
+      extractionWarnings.style.display = "block";
+      extractionWarnings.innerHTML = warnings.map(message => `<div>• ${message}</div>`).join("");
+    } else {
+      extractionWarnings.style.display = "none";
+      extractionWarnings.innerHTML = "";
+    }
+  }
+
   render(AppState, InteractionState);
 }
 
 // -------- Event Handlers --------
 
-// Mouse down
 canvas.addEventListener("mousedown", (e) => {
   const pos = getMousePos(e);
-  
-  // Check if clicking on a camera
+
+  if (isInReviewMode()) {
+    if (e.button === 0) {
+      beginReviewVertexDrag(pos);
+    }
+    return;
+  }
+
   for (const camera of AppState.cameras) {
     if (distance(pos, camera) < 15) {
       InteractionState.draggingCamera = camera.id;
@@ -177,19 +223,21 @@ canvas.addEventListener("mousedown", (e) => {
       return;
     }
   }
-  
-  // Deselect camera if clicking elsewhere
+
   if (AppState.selectedCameraId !== null) {
     AppState.selectedCameraId = null;
     updateUI();
   }
 });
 
-// Mouse move
 canvas.addEventListener("mousemove", (e) => {
   const pos = getMousePos(e);
-  
-  // Drag camera
+
+  if (isInReviewMode()) {
+    updateReviewVertexDrag(pos);
+    return;
+  }
+
   if (InteractionState.draggingCamera !== null) {
     const camera = AppState.cameras.find(c => c.id === InteractionState.draggingCamera);
     if (camera) {
@@ -199,32 +247,46 @@ canvas.addEventListener("mousemove", (e) => {
     }
     return;
   }
-  
-  // Preview line for polygon drawing
+
   if (AppState.mode === "draw" && !AppState.isClosed && AppState.polygon.length > 0) {
     InteractionState.previewPoint = pos;
     render(AppState, InteractionState);
   }
 });
 
-// Mouse up
 canvas.addEventListener("mouseup", () => {
+  if (isInReviewMode()) {
+    if (endReviewVertexDrag()) {
+      updateUI();
+    }
+    return;
+  }
+
   if (InteractionState.draggingCamera !== null) {
     pushState();
     InteractionState.draggingCamera = null;
   }
 });
 
-// Click
 canvas.addEventListener("click", (e) => {
   const pos = getMousePos(e);
-  
-  // Don't add point/camera if we were dragging
+
   if (InteractionState.draggingCamera !== null) {
     return;
   }
-  
-  // Place camera mode
+
+  if (isInReviewMode()) {
+    if (InteractionState.reviewPointerDownOnVertex) {
+      InteractionState.reviewPointerDownOnVertex = false;
+      return;
+    }
+
+    if (insertReviewVertexAtPoint(pos)) {
+      updateUI();
+    }
+    return;
+  }
+
   if (AppState.mode === "place" && AppState.isClosed) {
     if (isPointInPolygon(pos, AppState.polygon)) {
       pushState();
@@ -234,10 +296,8 @@ canvas.addEventListener("click", (e) => {
     }
     return;
   }
-  
-  // Draw polygon mode
+
   if (AppState.mode === "draw" && !AppState.isClosed) {
-    // Check if closing polygon
     if (AppState.polygon.length >= 3) {
       const first = AppState.polygon[0];
       if (distance(pos, first) < CLOSE_DISTANCE) {
@@ -249,45 +309,48 @@ canvas.addEventListener("click", (e) => {
         return;
       }
     }
-    
-    // Add point to polygon
+
     pushState();
     AppState.polygon.push(pos);
     updateUI();
   }
 });
 
-// Undo button
+canvas.addEventListener("contextmenu", (e) => {
+  if (!isInReviewMode()) return;
+  e.preventDefault();
+  const pos = getMousePos(e);
+  if (deleteReviewVertexAtPoint(pos)) {
+    updateUI();
+  }
+});
+
 undoBtn.addEventListener("click", () => {
   if (undo()) {
     updateUI();
   }
 });
 
-// Redo button
 redoBtn.addEventListener("click", () => {
   if (redo()) {
     updateUI();
   }
 });
 
-// Optimize button
 optimizeBtn.addEventListener("click", async () => {
-  if (!AppState.isClosed) return;
+  if (!AppState.isClosed || AppState.isReviewingExtraction) return;
 
   if (!parsePriorityZonesInput()) {
     alert("Priority zones must be valid JSON before optimizing.");
     return;
   }
-  
+
   optimizeBtn.disabled = true;
   optimizeBtn.textContent = "Optimizing...";
-  
+
   try {
     pushState();
-    console.log('Starting optimization, polygon points:', AppState.polygon.length);
 
-    // Call backend optimize API
     const payload = {
       polygon: AppState.polygon.map(p => ({ x: p.x, y: p.y })),
       max_cameras: AppState.maxCameras || 10,
@@ -296,68 +359,56 @@ optimizeBtn.addEventListener("click", async () => {
       priority_zones: AppState.priorityZones
     };
 
-    try {
-      // Use origin-relative URL so the request goes to the same origin
-      // that served the page. This avoids connection issues when the
-      // frontend is accessed via a forwarded/dev host.
-      const backendUrl = `${location.origin}/optimize`;
-      console.log('Sending optimize request to', backendUrl, payload);
+    const backendUrl = `${location.origin}/optimize`;
+    const resp = await fetch(backendUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
 
-      const resp = await fetch(backendUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      alert('Optimization failed: ' + (err.detail || resp.statusText || resp.status));
+      return;
+    }
 
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        console.error('Optimize API error', resp.status, err);
-        alert('Optimization failed: ' + (err.detail || resp.statusText || resp.status));
-        return;
-      }
-
-      const data = await resp.json();
-      console.log('Optimize API response', data);
-
-      if (data && data.success && Array.isArray(data.cameras)) {
-        if (data.settings) {
-          if (Number.isFinite(data.settings.max_cameras)) {
-            AppState.maxCameras = data.settings.max_cameras;
-            maxCamerasSlider.value = String(data.settings.max_cameras);
-            document.getElementById("maxCamerasValue").textContent = data.settings.max_cameras;
-          }
-
-          if (Number.isFinite(data.settings.camera_range)) {
-            AppState.globalRange = data.settings.camera_range;
-            globalRangeSlider.value = String(data.settings.camera_range);
-            document.getElementById("globalRangeValue").textContent = data.settings.camera_range;
-          }
-
-          if (Number.isFinite(data.settings.camera_fov)) {
-            AppState.globalFov = data.settings.camera_fov;
-            globalFovSlider.value = String(data.settings.camera_fov);
-            document.getElementById("globalFovValue").textContent = data.settings.camera_fov;
-          }
+    const data = await resp.json();
+    if (data && data.success && Array.isArray(data.cameras)) {
+      if (data.settings) {
+        if (Number.isFinite(data.settings.max_cameras)) {
+          AppState.maxCameras = data.settings.max_cameras;
+          maxCamerasSlider.value = String(data.settings.max_cameras);
+          document.getElementById("maxCamerasValue").textContent = data.settings.max_cameras;
         }
 
-        AppState.cameras = data.cameras.map(c => ({
-          id: c.id ?? (Date.now() + Math.random()),
-          x: c.x,
-          y: c.y,
-          angle: c.angle ?? 0,
-          range: c.range ?? AppState.globalRange,
-          fov: c.fov ?? AppState.globalFov
-        }));
-        AppState.selectedCameraId = null;
-        updateUI();
-      } else {
-        console.error('Unexpected optimize response', data);
-        alert('Optimization returned unexpected response');
+        if (Number.isFinite(data.settings.camera_range)) {
+          AppState.globalRange = data.settings.camera_range;
+          globalRangeSlider.value = String(data.settings.camera_range);
+          document.getElementById("globalRangeValue").textContent = data.settings.camera_range;
+        }
+
+        if (Number.isFinite(data.settings.camera_fov)) {
+          AppState.globalFov = data.settings.camera_fov;
+          globalFovSlider.value = String(data.settings.camera_fov);
+          document.getElementById("globalFovValue").textContent = data.settings.camera_fov;
+        }
       }
-    } catch (fetchErr) {
-      console.error('Network or fetch error during optimization', fetchErr);
-      alert('Network error: could not reach optimizer. Is the backend running?');
+
+      AppState.cameras = data.cameras.map(c => ({
+        id: c.id ?? (Date.now() + Math.random()),
+        x: c.x,
+        y: c.y,
+        angle: c.angle ?? 0,
+        range: c.range ?? AppState.globalRange,
+        fov: c.fov ?? AppState.globalFov
+      }));
+      AppState.selectedCameraId = null;
+      updateUI();
+    } else {
+      alert('Optimization returned unexpected response');
     }
+  } catch (fetchErr) {
+    alert('Network error: could not reach optimizer. Is the backend running?');
   } finally {
     optimizeBtn.disabled = false;
     optimizeBtn.innerHTML = `
@@ -369,7 +420,6 @@ optimizeBtn.addEventListener("click", async () => {
   }
 });
 
-// Delete camera button
 deleteCameraBtn.addEventListener("click", () => {
   if (AppState.selectedCameraId !== null) {
     pushState();
@@ -378,7 +428,6 @@ deleteCameraBtn.addEventListener("click", () => {
   }
 });
 
-// Clear all button
 clearBtn.addEventListener("click", () => {
   if (confirm("Are you sure you want to clear everything?")) {
     pushState();
@@ -388,20 +437,24 @@ clearBtn.addEventListener("click", () => {
     AppState.isClosed = false;
     AppState.mode = "draw";
     AppState.selectedCameraId = null;
+    AppState.extractedImage = null;
+    AppState.extractionWarnings = [];
+    AppState.isReviewingExtraction = false;
+    AppState._extractionResult = null;
     InteractionState.previewPoint = null;
+    InteractionState.reviewDraggingVertexIndex = null;
+    InteractionState.reviewPointerDownOnVertex = false;
     priorityZonesInput.value = "";
     priorityZonesInput.classList.remove("input-error");
     updateUI();
   }
 });
 
-// Toggle coverage button
 toggleCoverageBtn.addEventListener("click", () => {
   AppState.coverageVisible = !AppState.coverageVisible;
   updateUI();
 });
 
-// Camera angle slider
 angleSlider.addEventListener("input", (e) => {
   const selectedCamera = getSelectedCamera();
   if (selectedCamera) {
@@ -410,7 +463,6 @@ angleSlider.addEventListener("input", (e) => {
   }
 });
 
-// Camera FOV slider
 fovSlider.addEventListener("input", (e) => {
   const selectedCamera = getSelectedCamera();
   if (selectedCamera) {
@@ -419,7 +471,6 @@ fovSlider.addEventListener("input", (e) => {
   }
 });
 
-// Camera range slider
 rangeSlider.addEventListener("input", (e) => {
   const selectedCamera = getSelectedCamera();
   if (selectedCamera) {
@@ -428,7 +479,6 @@ rangeSlider.addEventListener("input", (e) => {
   }
 });
 
-// Global range slider
 globalRangeSlider.addEventListener("input", (e) => {
   const val = parseInt(e.target.value, 10);
   document.getElementById("globalRangeValue").textContent = val;
@@ -436,7 +486,6 @@ globalRangeSlider.addEventListener("input", (e) => {
   updateUI();
 });
 
-// Global FOV slider
 globalFovSlider.addEventListener("input", (e) => {
   const val = parseInt(e.target.value, 10);
   document.getElementById("globalFovValue").textContent = val;
@@ -444,7 +493,6 @@ globalFovSlider.addEventListener("input", (e) => {
   updateUI();
 });
 
-// Max cameras slider
 maxCamerasSlider.addEventListener("input", (e) => {
   const val = parseInt(e.target.value, 10);
   document.getElementById("maxCamerasValue").textContent = val;
@@ -457,10 +505,40 @@ priorityZonesInput.addEventListener("input", () => {
   updateUI();
 });
 
-// Keyboard controls
+if (extractBtn && extractUpload) {
+  extractBtn.addEventListener("click", () => extractUpload.click());
+}
+
+if (extractUpload) {
+  extractUpload.addEventListener("change", (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (file) {
+      uploadAndExtract(file)
+        .then(() => updateUI())
+        .catch(() => updateUI());
+    }
+  });
+}
+
+if (confirmExtractionBtn) {
+  confirmExtractionBtn.addEventListener("click", () => {
+    confirmExtraction();
+    updateUI();
+  });
+}
+
+if (rejectExtractionBtn) {
+  rejectExtractionBtn.addEventListener("click", () => {
+    rejectExtraction();
+    updateUI();
+  });
+}
+
 window.addEventListener("keydown", (e) => {
+  if (isInReviewMode()) return;
+
   const selectedCamera = getSelectedCamera();
-  
+
   if (selectedCamera) {
     if (e.key === "Delete" || e.key === "Backspace") {
       e.preventDefault();
@@ -469,25 +547,24 @@ window.addEventListener("keydown", (e) => {
       updateUI();
     } else if (e.key === "ArrowLeft") {
       e.preventDefault();
-      updateCamera(selectedCamera.id, { 
-        angle: (selectedCamera.angle - 15 + 360) % 360 
+      updateCamera(selectedCamera.id, {
+        angle: (selectedCamera.angle - 15 + 360) % 360
       });
       updateUI();
     } else if (e.key === "ArrowRight") {
       e.preventDefault();
-      updateCamera(selectedCamera.id, { 
-        angle: (selectedCamera.angle + 15) % 360 
+      updateCamera(selectedCamera.id, {
+        angle: (selectedCamera.angle + 15) % 360
       });
       updateUI();
     }
   }
-  
-  // Global shortcuts
+
   if (e.ctrlKey || e.metaKey) {
     if (e.key === "z" && !e.shiftKey) {
       e.preventDefault();
       if (undo()) updateUI();
-    } else if (e.key === "z" && e.shiftKey || e.key === "y") {
+    } else if ((e.key === "z" && e.shiftKey) || e.key === "y") {
       e.preventDefault();
       if (redo()) updateUI();
     }

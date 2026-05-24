@@ -20,6 +20,18 @@ export function render(state, interaction) {
   }
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // If there's an extracted image, draw it as a background layer scaled to canvas
+  if (state.extractedImage) {
+    try {
+      ctx.save();
+      ctx.globalAlpha = 0.95;
+      ctx.drawImage(state.extractedImage, 0, 0, canvas.width, canvas.height);
+      ctx.restore();
+    } catch (e) {
+      // ignore image draw errors
+    }
+  }
+
   drawGrid();
 
   if (state.priorityZones && state.priorityZones.length > 0) {
@@ -27,7 +39,9 @@ export function render(state, interaction) {
   }
   
   // Draw polygon
-  if (state.polygon.length > 0) {
+  if (state.isReviewingExtraction && state.polygon.length > 0) {
+    drawReviewPolygon(state.polygon, state.isClosed);
+  } else if (state.polygon.length > 0) {
     drawPolygon(state.polygon, state.isClosed);
   }
   
@@ -53,6 +67,31 @@ export function render(state, interaction) {
   if (state.cameras.length > 0) {
     drawCameras(state.cameras, state.selectedCameraId);
   }
+}
+
+function drawReviewPolygon(points, isClosed) {
+  if (!points || points.length === 0) return;
+  ctx.save();
+  ctx.setLineDash([6, 6]);
+  ctx.strokeStyle = 'rgba(96,165,250,0.95)';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+  if (isClosed) ctx.closePath();
+  ctx.stroke();
+
+  points.forEach((p, i) => {
+    ctx.fillStyle = i === 0 ? '#93c5fd' : '#bfdbfe';
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(15, 23, 42, 0.95)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  });
+
+  ctx.restore();
 }
 
 function drawGrid() {

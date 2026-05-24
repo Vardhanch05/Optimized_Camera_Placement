@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -6,10 +6,15 @@ from pydantic import BaseModel, Field
 from typing import List
 import uvicorn
 
+# Import optimizer lazily inside endpoints to avoid import-time failures when
+# compiled binary dependencies (e.g. Shapely) are not available in the environment.
+
 try:
-    from .optimizer import optimize_camera_placement, calculate_coverage_percentage
+    from .extract_models import ExtractionResponse, PriorityZone as ExtractPriorityZone
+    from .extractor import extract_layout
 except ImportError:
-    from optimizer import optimize_camera_placement, calculate_coverage_percentage
+    from extract_models import ExtractionResponse, PriorityZone as ExtractPriorityZone
+    from extractor import extract_layout
 
 app = FastAPI(title="Camera Placement Optimizer API")
 
@@ -123,7 +128,15 @@ def optimize(request: OptimizeRequest):
             )
         
         polygon_coords = [(p.x, p.y) for p in request.polygon]
-        
+
+        try:
+            try:
+                from .optimizer import optimize_camera_placement, calculate_coverage_percentage
+            except Exception:
+                from optimizer import optimize_camera_placement, calculate_coverage_percentage
+        except Exception as ie:
+            raise HTTPException(status_code=500, detail=f"Optimizer dependency error: {ie}")
+
         cameras = optimize_camera_placement(
             polygon=polygon_coords,
             max_cameras=request.max_cameras,
@@ -131,7 +144,7 @@ def optimize(request: OptimizeRequest):
             camera_fov=request.camera_fov,
             priority_zones=[zone.model_dump() for zone in request.priority_zones],
         )
-        
+
         # Calculate coverage for the optimized placement
         coverage = calculate_coverage_percentage(
             polygon_coords,
@@ -187,6 +200,14 @@ def calculate_coverage(request: CoverageRequest):
             for c in request.cameras
         ]
         
+        try:
+            try:
+                from .optimizer import calculate_coverage_percentage
+            except Exception:
+                from optimizer import calculate_coverage_percentage
+        except Exception as ie:
+            raise HTTPException(status_code=500, detail=f"Coverage dependency error: {ie}")
+
         coverage = calculate_coverage_percentage(
             polygon_coords,
             cameras_data,
@@ -204,6 +225,79 @@ def calculate_coverage(request: CoverageRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Coverage calculation error: {str(e)}")
+
+
+@app.post("/extract", response_model=ExtractionResponse)
+def extract(file: UploadFile = File(...)):
+    """
+    Extract floor-plan layout from uploaded image.
+    Accepts multipart file upload (PNG, JPEG, WEBP), max 10MB.
+    """
+    try:
+        # Validate extension from filename
+        filename = getattr(file, 'filename', '') or ''
+        from pathlib import Path
+        ext = Path(filename).suffix.lower()
+        allowed_exts = {'.png', '.jpg', '.jpeg', '.webp'}
+        allowed_mime = { 'image/png', 'image/jpeg', 'image/webp' }
+
+        if ext == '':
+            # no extension
+            raise HTTPException(status_code=415, detail="Unsupported file type. Please upload a PNG, JPEG, or WEBP image.")
+
+        if ext not in allowed_exts:
+            raise HTTPException(status_code=415, detail="Unsupported file type. Please upload a PNG, JPEG, or WEBP image.")
+
+        # Validate MIME type
+        if file.content_type not in allowed_mime:
+            raise HTTPException(status_code=415, detail="Unsupported file type. Please upload a PNG, JPEG, or WEBP image.")
+
+        # Read contents and validate size
+        contents = file.file.read()
+        if not contents:
+            raise HTTPException(status_code=400, detail="Empty file uploaded")
+
+        if len(contents) > 10 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="File too large. Maximum allowed size is 10MB.")
+
+        try:
+            import numpy as np
+            import cv2
+        except Exception:
+            raise HTTPException(status_code=500, detail="Server missing image dependencies (cv2). Install required packages")
+
+        nparr = np.frombuffer(contents, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        if img is None:
+            raise HTTPException(status_code=400, detail="Could not read image file. The file may be corrupt or in an unsupported format.")
+
+        result = extract_layout(img)
+
+        # Map suggested priority zones to model type if needed
+        zones = []
+        for z in result.get("suggested_priority_zones", []):
+            try:
+                zp = ExtractPriorityZone(**z)
+                zones.append(zp)
+            except Exception:
+                # keep as raw dict if conversion fails
+                pass
+
+        return {
+            "outer_polygon": result.get("outer_polygon", []),
+            "inner_polygons": result.get("inner_polygons", []),
+            "suggested_priority_zones": result.get("suggested_priority_zones", []),
+            "canvas_width": int(result.get("canvas_width", 800)),
+            "canvas_height": int(result.get("canvas_height", 600)),
+            "warnings": result.get("warnings", [])
+        }
+
+    except HTTPException:
+        raise
+    except Exception:
+        # Do not expose internal errors to clients
+        raise HTTPException(status_code=500, detail="Extraction failed unexpectedly — please try again later")
 
 # -------- Run Server --------
 

@@ -14,12 +14,20 @@ export const AppState = {
   maxCameras: 10
 };
 
+// Extraction UI state
+AppState.extractedImage = null; // HTMLImageElement
+AppState.extractionPending = false;
+AppState.extractionWarnings = [];
+AppState.isReviewingExtraction = false;
+
 // -------- Interaction State (not undoable) --------
 
 export const InteractionState = {
   isDrawing: false,
   previewPoint: null,
-  draggingCamera: null
+  draggingCamera: null,
+  reviewDraggingVertexIndex: null,
+  reviewPointerDownOnVertex: false
 };
 
 // -------- History --------
@@ -27,21 +35,32 @@ export const InteractionState = {
 export const undoStack = [];
 export const redoStack = [];
 
+function createStateSnapshot() {
+  return structuredClone({
+    ...AppState,
+    extractedImage: null,
+    extractionPending: false,
+    extractionWarnings: Array.isArray(AppState.extractionWarnings) ? [...AppState.extractionWarnings] : [],
+    isReviewingExtraction: false,
+    _extractionResult: null
+  });
+}
+
 export function pushState() {
-  undoStack.push(structuredClone(AppState));
+  undoStack.push(createStateSnapshot());
   redoStack.length = 0;
 }
 
 export function undo() {
   if (undoStack.length === 0) return false;
-  redoStack.push(structuredClone(AppState));
+  redoStack.push(createStateSnapshot());
   Object.assign(AppState, undoStack.pop());
   return true;
 }
 
 export function redo() {
   if (redoStack.length === 0) return false;
-  undoStack.push(structuredClone(AppState));
+  undoStack.push(createStateSnapshot());
   Object.assign(AppState, redoStack.pop());
   return true;
 }
@@ -96,3 +115,5 @@ export function updateAllCamerasDefaults(range, fov) {
   if (range !== undefined) AppState.globalRange = range;
   if (fov !== undefined) AppState.globalFov = fov;
 }
+
+// Debug global removed before Phase 3
