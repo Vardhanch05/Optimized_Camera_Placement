@@ -7,11 +7,19 @@ const EDGE_HIT_DISTANCE = 10;
 
 function setExtractionWorkingPolygon(data) {
   if (Array.isArray(data.outer_polygon) && data.outer_polygon.length > 0) {
-    AppState.polygon = data.outer_polygon.map(([x, y]) => ({ x, y }));
+    const points = data.outer_polygon.map(([x, y]) => ({ x, y }));
+    const first = points[0];
+    const last = points[points.length - 1];
+    if (first && last && first.x === last.x && first.y === last.y) {
+      points.pop();
+    }
+    AppState.polygon = points;
+    AppState.polygonClosed = true;
     AppState.isClosed = true;
     AppState.mode = 'draw';
   } else {
     AppState.polygon = [];
+    AppState.polygonClosed = false;
     AppState.isClosed = false;
     AppState.mode = 'draw';
   }
@@ -121,6 +129,9 @@ export function confirmExtraction() {
   pushState();
   // Commit the reviewed polygon as-is so any vertex edits are preserved.
   AppState.isClosed = Array.isArray(AppState.polygon) && AppState.polygon.length >= 3;
+  // Mirror manual completion flow: expose legacy flag and clear preview point
+  AppState.polygonClosed = AppState.isClosed === true;
+  InteractionState.previewPoint = null;
   AppState.mode = 'place';
 
   // Load priority zones
@@ -150,6 +161,7 @@ export function rejectExtraction() {
   AppState.extractionWarnings = [];
   AppState._extractionResult = null;
   AppState.polygon = [];
+  AppState.polygonClosed = false;
   AppState.isClosed = false;
   AppState.mode = 'draw';
   InteractionState.reviewDraggingVertexIndex = null;
