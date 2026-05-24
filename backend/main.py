@@ -6,10 +6,8 @@ from pydantic import BaseModel, Field
 from typing import List
 import uvicorn
 
-try:
-    from .optimizer import optimize_camera_placement, calculate_coverage_percentage
-except ImportError:
-    from optimizer import optimize_camera_placement, calculate_coverage_percentage
+# Import optimizer lazily inside endpoints to avoid import-time failures when
+# compiled binary dependencies (e.g. Shapely) are not available in the environment.
 
 try:
     from .extract_models import ExtractionResponse, PriorityZone as ExtractPriorityZone
@@ -130,7 +128,15 @@ def optimize(request: OptimizeRequest):
             )
         
         polygon_coords = [(p.x, p.y) for p in request.polygon]
-        
+
+        try:
+            try:
+                from .optimizer import optimize_camera_placement, calculate_coverage_percentage
+            except Exception:
+                from optimizer import optimize_camera_placement, calculate_coverage_percentage
+        except Exception as ie:
+            raise HTTPException(status_code=500, detail=f"Optimizer dependency error: {ie}")
+
         cameras = optimize_camera_placement(
             polygon=polygon_coords,
             max_cameras=request.max_cameras,
@@ -138,7 +144,7 @@ def optimize(request: OptimizeRequest):
             camera_fov=request.camera_fov,
             priority_zones=[zone.model_dump() for zone in request.priority_zones],
         )
-        
+
         # Calculate coverage for the optimized placement
         coverage = calculate_coverage_percentage(
             polygon_coords,
@@ -194,6 +200,14 @@ def calculate_coverage(request: CoverageRequest):
             for c in request.cameras
         ]
         
+        try:
+            try:
+                from .optimizer import calculate_coverage_percentage
+            except Exception:
+                from optimizer import calculate_coverage_percentage
+        except Exception as ie:
+            raise HTTPException(status_code=500, detail=f"Coverage dependency error: {ie}")
+
         coverage = calculate_coverage_percentage(
             polygon_coords,
             cameras_data,

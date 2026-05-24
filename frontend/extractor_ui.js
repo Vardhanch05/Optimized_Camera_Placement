@@ -1,5 +1,68 @@
-import { AppState, pushState } from './state.js';
+import { AppState, InteractionState, pushState } from './state.js';
 import { render } from './render.js';
+import { distance } from './geometry.js';
+
+const VERTEX_HIT_RADIUS = 12;
+const EDGE_HIT_DISTANCE = 10;
+
+function setExtractionWorkingPolygon(data) {
+  if (Array.isArray(data.outer_polygon) && data.outer_polygon.length > 0) {
+    AppState.polygon = data.outer_polygon.map(([x, y]) => ({ x, y }));
+    AppState.isClosed = true;
+    AppState.mode = 'draw';
+  } else {
+    AppState.polygon = [];
+    AppState.isClosed = false;
+    AppState.mode = 'draw';
+  }
+}
+
+function pointToSegmentDistance(point, start, end) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  if (dx === 0 && dy === 0) return distance(point, start);
+
+  const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / (dx * dx + dy * dy)));
+  const projected = { x: start.x + t * dx, y: start.y + t * dy };
+  return distance(point, projected);
+}
+
+function findNearestVertexIndex(point) {
+  if (!Array.isArray(AppState.polygon) || AppState.polygon.length === 0) return -1;
+  let bestIndex = -1;
+  let bestDistance = VERTEX_HIT_RADIUS;
+  for (let index = 0; index < AppState.polygon.length; index++) {
+    const currentDistance = distance(point, AppState.polygon[index]);
+    if (currentDistance <= bestDistance) {
+      bestDistance = currentDistance;
+      bestIndex = index;
+    }
+  }
+  return bestIndex;
+}
+
+function findNearestEdgeIndex(point) {
+  if (!Array.isArray(AppState.polygon) || AppState.polygon.length < 2) return -1;
+  let bestIndex = -1;
+  let bestDistance = EDGE_HIT_DISTANCE;
+  for (let index = 0; index < AppState.polygon.length; index++) {
+    const start = AppState.polygon[index];
+    const end = AppState.polygon[(index + 1) % AppState.polygon.length];
+    const currentDistance = pointToSegmentDistance(point, start, end);
+    if (currentDistance <= bestDistance) {
+      bestDistance = currentDistance;
+      bestIndex = index;
+    }
+  }
+  return bestIndex;
+}
+
+function clampPolygonMinimumVertices() {
+  if (AppState.polygon.length < 3) {
+    AppState.isClosed = false;
+    AppState.mode = 'draw';
+  }
+}
 
 export async function uploadAndExtract(file) {
   if (!file) return;
@@ -26,14 +89,21 @@ export async function uploadAndExtract(file) {
     const imgUrl = URL.createObjectURL(file);
     const img = new Image();
     img.src = imgUrl;
-    img.onload = () => {
-      AppState.extractedImage = img;
-      AppState.extractionWarnings = data.warnings || [];
-      // Temporarily store extraction result on AppState for review
-      AppState._extractionResult = data;
-      AppState.isReviewingExtraction = true;
-      render(AppState, {});
-    };
+
+    await new Promise((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error("Uploaded image could not be loaded for review"));
+    });
+
+    AppState.extractedImage = img;
+    AppState.extractionWarnings = data.warnings || [];
+    // Temporarily store extraction result on AppState for review
+    AppState._extractionResult = data;
+    setExtractionWorkingPolygon(data);
+    AppState.isReviewingExtraction = true;
+    InteractionState.reviewDraggingVertexIndex = null;
+    InteractionState.reviewPointerDownOnVertex = false;
+    render(AppState, {});
 
   } catch (e) {
     console.error('Extraction error', e);
@@ -49,12 +119,9 @@ export function confirmExtraction() {
   if (!data) return;
 
   pushState();
-  // Load outer polygon
-  if (Array.isArray(data.outer_polygon) && data.outer_polygon.length > 0) {
-    AppState.polygon = data.outer_polygon.map(p => ({ x: p[0], y: p[1] }));
-    AppState.isClosed = true;
-    AppState.mode = 'place';
-  }
+  // Commit the reviewed polygon as-is so any vertex edits are preserved.
+  AppState.isClosed = Array.isArray(AppState.polygon) && AppState.polygon.length >= 3;
+  AppState.mode = 'place';
 
   // Load priority zones
   if (Array.isArray(data.suggested_priority_zones)) {
@@ -71,6 +138,9 @@ export function confirmExtraction() {
   AppState.isReviewingExtraction = false;
   AppState.extractedImage = null;
   AppState._extractionResult = null;
+  AppState.extractionWarnings = [];
+  InteractionState.reviewDraggingVertexIndex = null;
+  InteractionState.reviewPointerDownOnVertex = false;
   render(AppState, {});
 }
 
@@ -79,11 +149,61 @@ export function rejectExtraction() {
   AppState.extractedImage = null;
   AppState.extractionWarnings = [];
   AppState._extractionResult = null;
+  AppState.polygon = [];
+  AppState.isClosed = false;
+  AppState.mode = 'draw';
+  InteractionState.reviewDraggingVertexIndex = null;
+  InteractionState.reviewPointerDownOnVertex = false;
   render(AppState, {});
 }
 
-// Vertex correction hooks will call existing functions in main.js; we expose
-// simple helpers to check review mode.
 export function isInReviewMode() {
   return AppState.isReviewingExtraction === true;
+}
+
+export function beginReviewVertexDrag(point) {
+  if (!isInReviewMode()) return false;
+  const vertexIndex = findNearestVertexIndex(point);
+  if (vertexIndex === -1) return false;
+  InteractionState.reviewDraggingVertexIndex = vertexIndex;
+  InteractionState.reviewPointerDownOnVertex = true;
+  return true;
+}
+
+export function updateReviewVertexDrag(point) {
+  if (!isInReviewMode()) return false;
+  const vertexIndex = InteractionState.reviewDraggingVertexIndex;
+  if (vertexIndex === null || vertexIndex === undefined) return false;
+  AppState.polygon[vertexIndex] = { x: point.x, y: point.y };
+  render(AppState, {});
+  return true;
+}
+
+export function endReviewVertexDrag() {
+  if (InteractionState.reviewDraggingVertexIndex === null || InteractionState.reviewDraggingVertexIndex === undefined) return false;
+  pushState();
+  InteractionState.reviewDraggingVertexIndex = null;
+  render(AppState, {});
+  return true;
+}
+
+export function insertReviewVertexAtPoint(point) {
+  if (!isInReviewMode() || AppState.polygon.length < 2) return false;
+  const edgeIndex = findNearestEdgeIndex(point);
+  if (edgeIndex === -1) return false;
+  pushState();
+  AppState.polygon.splice(edgeIndex + 1, 0, { x: point.x, y: point.y });
+  render(AppState, {});
+  return true;
+}
+
+export function deleteReviewVertexAtPoint(point) {
+  if (!isInReviewMode() || AppState.polygon.length <= 3) return false;
+  const vertexIndex = findNearestVertexIndex(point);
+  if (vertexIndex === -1) return false;
+  pushState();
+  AppState.polygon.splice(vertexIndex, 1);
+  clampPolygonMinimumVertices();
+  render(AppState, {});
+  return true;
 }

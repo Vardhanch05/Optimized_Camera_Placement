@@ -25,7 +25,9 @@ AppState.isReviewingExtraction = false;
 export const InteractionState = {
   isDrawing: false,
   previewPoint: null,
-  draggingCamera: null
+  draggingCamera: null,
+  reviewDraggingVertexIndex: null,
+  reviewPointerDownOnVertex: false
 };
 
 // -------- History --------

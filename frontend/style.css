@@ -173,6 +173,15 @@ h1 {
   font-size: 12px;
 }
 
+.extraction-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #cbd5e1;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
 .extraction-panel {
   background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
   border-left: 3px solid rgba(59,130,246,0.12);

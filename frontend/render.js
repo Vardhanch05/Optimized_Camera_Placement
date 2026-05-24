@@ -39,12 +39,9 @@ export function render(state, interaction) {
   }
   
   // Draw polygon
-  if (state.polygon.length > 0) {
-    // If we're reviewing an extracted polygon, draw it distinctly
-    if (state.isReviewingExtraction && state._extractionResult && Array.isArray(state._extractionResult.outer_polygon)) {
-      const ext = state._extractionResult.outer_polygon.map(p => ({ x: p[0], y: p[1] }));
-      drawExtractedPolygon(ext);
-    }
+  if (state.isReviewingExtraction && state.polygon.length > 0) {
+    drawReviewPolygon(state.polygon, state.isClosed);
+  } else if (state.polygon.length > 0) {
     drawPolygon(state.polygon, state.isClosed);
   }
   
@@ -72,7 +69,7 @@ export function render(state, interaction) {
   }
 }
 
-function drawExtractedPolygon(points) {
+function drawReviewPolygon(points, isClosed) {
   if (!points || points.length === 0) return;
   ctx.save();
   ctx.setLineDash([6, 6]);
@@ -81,8 +78,19 @@ function drawExtractedPolygon(points) {
   ctx.beginPath();
   ctx.moveTo(points[0].x, points[0].y);
   for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
-  ctx.closePath();
+  if (isClosed) ctx.closePath();
   ctx.stroke();
+
+  points.forEach((p, i) => {
+    ctx.fillStyle = i === 0 ? '#93c5fd' : '#bfdbfe';
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(15, 23, 42, 0.95)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  });
+
   ctx.restore();
 }
 
