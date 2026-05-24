@@ -234,8 +234,23 @@ def extract(file: UploadFile = File(...)):
     Accepts multipart file upload (PNG, JPEG, WEBP), max 10MB.
     """
     try:
-        if file.content_type not in ("image/png", "image/jpeg", "image/webp"):
-            raise HTTPException(status_code=400, detail="Unsupported file type. Allowed: PNG, JPEG, WEBP")
+        # Validate extension from filename
+        filename = getattr(file, 'filename', '') or ''
+        from pathlib import Path
+        ext = Path(filename).suffix.lower()
+        allowed_exts = {'.png', '.jpg', '.jpeg', '.webp'}
+        allowed_mime = { 'image/png', 'image/jpeg', 'image/webp' }
+
+        if ext == '':
+            # no extension
+            raise HTTPException(status_code=415, detail="Unsupported file type. Please upload a PNG, JPEG, or WEBP image.")
+
+        if ext not in allowed_exts:
+            raise HTTPException(status_code=415, detail="Unsupported file type. Please upload a PNG, JPEG, or WEBP image.")
+
+        # Validate MIME type
+        if file.content_type not in allowed_mime:
+            raise HTTPException(status_code=415, detail="Unsupported file type. Please upload a PNG, JPEG, or WEBP image.")
 
         # Read contents and validate size
         contents = file.file.read()
@@ -243,7 +258,7 @@ def extract(file: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail="Empty file uploaded")
 
         if len(contents) > 10 * 1024 * 1024:
-            raise HTTPException(status_code=400, detail="File too large. Max 10MB")
+            raise HTTPException(status_code=413, detail="File too large. Maximum allowed size is 10MB.")
 
         try:
             import numpy as np
@@ -253,6 +268,9 @@ def extract(file: UploadFile = File(...)):
 
         nparr = np.frombuffer(contents, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        if img is None:
+            raise HTTPException(status_code=400, detail="Could not read image file. The file may be corrupt or in an unsupported format.")
 
         result = extract_layout(img)
 
@@ -277,8 +295,9 @@ def extract(file: UploadFile = File(...)):
 
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Extraction error: {str(e)}")
+    except Exception:
+        # Do not expose internal errors to clients
+        raise HTTPException(status_code=500, detail="Extraction failed unexpectedly — please try again later")
 
 # -------- Run Server --------
 

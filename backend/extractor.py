@@ -1,8 +1,12 @@
 import cv2
 import numpy as np
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 def validate_image(image: np.ndarray) -> None:
@@ -14,22 +18,43 @@ def validate_image(image: np.ndarray) -> None:
         raise ValueError("Unsupported image shape")
 
 
-def preprocess(image: np.ndarray) -> np.ndarray:
+def preprocess(image: np.ndarray, warnings: Optional[List[str]] = None) -> np.ndarray:
+    """Convert image to a cleaned binary image with denoising, contrast handling.
+
+    Adds warnings to the provided list when applicable.
+    """
+    if warnings is None:
+        warnings = []
+
     # Convert to grayscale
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    # Denoise
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    # Measure contrast
+    std = float(np.std(gray))
+    low_contrast = std < 30.0
+    if low_contrast:
+        warnings.append("Low contrast image detected — results may be inaccurate")
 
-    # Attempt Otsu thresholding
-    _, otsu = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # Measure high-frequency noise via Laplacian
+    lap = cv2.Laplacian(gray, cv2.CV_64F)
+    mean_abs_lap = float(np.mean(np.abs(lap)))
 
-    # If low contrast (small std dev), use adaptive threshold
-    if np.std(blurred) < 10:
+    # Choose denoising strength
+    h = 20 if mean_abs_lap > 100.0 else 10
+
+    # Apply fast denoising (grayscale)
+    denoised = cv2.fastNlMeansDenoising(gray, None, h, 7, 21)
+
+    # Small gaussian blur to stabilize thresholding
+    blurred = cv2.GaussianBlur(denoised, (5, 5), 0)
+
+    # Threshold
+    if low_contrast:
         binarized = cv2.adaptiveThreshold(
             blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
         )
     else:
+        _, otsu = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         binarized = otsu
 
     # Morphological closing to bridge gaps
@@ -39,67 +64,122 @@ def preprocess(image: np.ndarray) -> np.ndarray:
     return closed
 
 
-def _deskew_image(binary: np.ndarray, original: np.ndarray) -> Tuple[np.ndarray, float]:
-    # Find largest contour and deskew based on its minAreaRect
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
+def _deskew_image(original: np.ndarray, warnings: Optional[List[str]] = None) -> Tuple[np.ndarray, float]:
+    """Estimate skew using dark pixels and deskew if angle is reasonable.
+
+    Returns the possibly-rotated image and the applied angle. Adds warning
+    if rotation is too large or skipped.
+    """
+    if warnings is None:
+        warnings = []
+
+    gray = cv2.cvtColor(original, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape[:2]
+    image_area = h * w
+
+    # Threshold for dark pixels (invert so dark regions are white)
+    _, dark = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY_INV)
+    dark_count = int(cv2.countNonZero(dark))
+
+    # If very few dark pixels, skip deskew (likely blank or minimal content)
+    if dark_count < max(10, 0.002 * image_area):
         return original, 0.0
 
-    largest = max(contours, key=cv2.contourArea)
-    rect = cv2.minAreaRect(largest)
-    angle = rect[-1]
-    if angle < -45:
-        angle = angle + 90
+    # Collect points where dark mask is set
+    pts = np.column_stack(np.where(dark > 0)).astype(np.float32)
+    if pts.shape[0] < 3:
+        return original, 0.0
 
-    (h, w) = original.shape[:2]
-    center = (w // 2, h // 2)
-    M = cv2.getRotationMatrix2D(center, angle, 1.0)
-    rotated = cv2.warpAffine(original, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-    return rotated, angle
+    try:
+        rect = cv2.minAreaRect(pts)
+        angle = rect[-1]
+        # Normalize angle to [-90,90]
+        if angle < -45:
+            angle = angle + 90
+
+        if abs(angle) <= 45:
+            # Apply rotation correction
+            center = (w // 2, h // 2)
+            M = cv2.getRotationMatrix2D(center, angle, 1.0)
+            rotated = cv2.warpAffine(original, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+            return rotated, float(angle)
+        else:
+            warnings.append("Image appears heavily rotated — consider reorienting before uploading")
+            return original, float(angle)
+    except Exception as e:
+        logger.exception("Deskew estimation failed")
+        warnings.append("Could not estimate image rotation; proceeding without deskew")
+        return original, 0.0
 
 
-def detect_contours(binary: np.ndarray) -> List[np.ndarray]:
+def detect_contours(binary: np.ndarray, warnings: Optional[List[str]] = None) -> List[np.ndarray]:
     contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     h, w = binary.shape[:2]
     image_area = h * w
 
     filtered = []
     for c in contours:
-        area = cv2.contourArea(c)
-        if area < max(100, 0.0005 * image_area):
+        try:
+            area = cv2.contourArea(c)
+            # Discard tiny contours (less than 0.1% of image area)
+            if area < max(100, 0.001 * image_area):
+                continue
+
+            x, y, cw, ch = cv2.boundingRect(c)
+            aspect = cw / max(1, ch)
+            inv_aspect = ch / max(1, cw)
+            max_aspect = max(aspect, inv_aspect)
+            # Discard extreme aspect ratio contours
+            if max_aspect > 20.0:
+                continue
+
+            # Circularity check
+            peri = cv2.arcLength(c, True)
+            if peri > 0:
+                circularity = (4.0 * np.pi * area) / (peri * peri)
+                if circularity > 0.85:
+                    continue
+
+            filtered.append(c)
+        except Exception:
+            # Skip problematic contour
             continue
-        x, y, cw, ch = cv2.boundingRect(c)
-        aspect = max(cw / max(1, ch), ch / max(1, cw))
-        # Filter very thin lines unless they're large
-        if aspect > 15 and area < 0.01 * image_area:
-            continue
-        filtered.append(c)
 
     # Sort by area descending
     filtered.sort(key=lambda c: cv2.contourArea(c), reverse=True)
     return filtered
 
 
-def extract_polygons(contours: List[np.ndarray], image_shape: Tuple[int, int]) -> Dict[str, List[List[Tuple[float, float]]]]:
+def extract_polygons(contours: List[np.ndarray], image_shape: Tuple[int, int], warnings: Optional[List[str]] = None) -> Dict[str, List[List[Tuple[float, float]]]]:
     """
     Convert contours to shapely Polygons, merge and return outer + inner polygons.
     This function expects Shapely to be available (imported at module top).
     """
+    if warnings is None:
+        warnings = []
+
     polygons = []
     for c in contours:
         peri = cv2.arcLength(c, True)
         approx = cv2.approxPolyDP(c, 0.01 * peri, True)
         pts = [(int(p[0][0]), int(p[0][1])) for p in approx]
-        if len(pts) < 3:
+        # Discard if too few vertices after simplification
+        if len(pts) < 4:
             continue
         try:
             poly = Polygon(pts)
             if not poly.is_valid:
-                poly = poly.buffer(0)
+                try:
+                    poly = poly.buffer(0)
+                except Exception:
+                    warnings.append("A contour failed to repair and was skipped")
+                    continue
             if poly.is_empty or poly.area < 1:
                 continue
             polygons.append(poly)
         except Exception:
+            # If Shapely fails, skip this contour but continue
+            warnings.append("A contour could not be converted to polygon and was skipped")
             continue
 
     if not polygons:
@@ -195,14 +275,14 @@ def suggest_priority_zones(binary: np.ndarray, outer_polygon: List[List[float]])
 def generate_warnings(image: np.ndarray, polygons: Dict[str, List]) -> List[str]:
     warnings = []
     if not polygons.get("outer_polygon"):
-        warnings.append("No outer polygon detected; extraction failed or image is empty.")
+        warnings.append("No room boundary detected — please draw the polygon manually")
     if image is None or image.size == 0:
         warnings.append("Input image appears empty or unreadable.")
     return warnings
 
 
 def extract_layout(image: np.ndarray, canvas_width: int = 800, canvas_height: int = 600) -> Dict:
-    warnings = []
+    warnings: List[str] = []
     try:
         validate_image(image)
     except ValueError as e:
@@ -216,17 +296,33 @@ def extract_layout(image: np.ndarray, canvas_width: int = 800, canvas_height: in
         }
 
     try:
-        pre = preprocess(image)
-        deskewed, angle = _deskew_image(pre, image)
+        # Preprocess with warnings capture
+        pre = preprocess(image, warnings)
+
+        # Deskew using original image and capture any deskew warnings
+        deskewed, angle = _deskew_image(image, warnings)
         if abs(angle) > 1.0:
             warnings.append(f"Image deskewed by {angle:.1f} degrees")
 
-        bin_pre = preprocess(deskewed)
-        contours = detect_contours(bin_pre)
-        polygons = extract_polygons(contours, deskewed.shape[:2])
+        # Re-run preprocessing on deskewed image
+        bin_pre = preprocess(deskewed, warnings)
+
+        contours = detect_contours(bin_pre, warnings)
+        polygons = extract_polygons(contours, deskewed.shape[:2], warnings)
         scaled = scale_to_canvas(polygons, deskewed.shape[:2], canvas_width=canvas_width, canvas_height=canvas_height)
         zones = suggest_priority_zones(bin_pre, scaled.get("outer_polygon", []))
         warnings.extend(generate_warnings(deskewed, scaled))
+
+        # If no outer polygon found, return empty and a user-facing warning
+        if not scaled.get("outer_polygon"):
+            return {
+                "outer_polygon": [],
+                "inner_polygons": [],
+                "suggested_priority_zones": zones,
+                "canvas_width": canvas_width,
+                "canvas_height": canvas_height,
+                "warnings": warnings
+            }
 
         return {
             "outer_polygon": scaled.get("outer_polygon", []),
@@ -237,11 +333,13 @@ def extract_layout(image: np.ndarray, canvas_width: int = 800, canvas_height: in
             "warnings": warnings
         }
     except Exception as e:
+        # Log unexpected exception but do not expose internals to caller
+        logger.exception("Unexpected error during extraction")
         return {
             "outer_polygon": [],
             "inner_polygons": [],
             "suggested_priority_zones": [],
             "canvas_width": canvas_width,
             "canvas_height": canvas_height,
-            "warnings": [f"Extraction error: {str(e)}"]
+            "warnings": ["Extraction failed unexpectedly — please draw the polygon manually"]
         }
