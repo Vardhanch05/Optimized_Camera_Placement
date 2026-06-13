@@ -283,6 +283,93 @@ def is_point_visible_from_camera(
     line = LineString([(cx, cy), (px, py)])
     return polygon.covers(line)
 
+
+def is_visible(
+    camera_pos: Tuple[float, float],
+    sample_point: Tuple[float, float],
+    polygon: Polygon,
+    wall_segments: Optional[List[List[List[float]]]] = None,
+) -> bool:
+    line = LineString([camera_pos, sample_point])
+
+    if polygon is not None and not polygon.is_empty and not polygon.covers(line):
+        return False
+
+    if wall_segments:
+        for wall in wall_segments:
+            wall_line = LineString(wall)
+            if line.crosses(wall_line):
+                return False
+
+    return True
+
+
+def generate_boundary_candidates(
+    polygon: List[Tuple[float, float]],
+    step: float = CANDIDATE_STEP,
+) -> List[Dict]:
+    return generate_mounting_candidates(polygon, step)
+
+
+def greedy_optimize(
+    candidates: List[Dict],
+    sample_points: List[Tuple[float, float]],
+    room_polygon: Polygon,
+    wall_segments: Optional[List[List[List[float]]]],
+    sample_weights: List[float],
+    max_cameras: int,
+    camera_range: float,
+    camera_fov: float,
+) -> List[Dict]:
+    candidate_coverages: List[Dict] = []
+
+    for pos in candidates:
+        camera = {
+            'x': pos['x'],
+            'y': pos['y'],
+            'angle': pos['angle'],
+            'range': camera_range,
+            'fov': camera_fov,
+        }
+        covered: set[int] = set()
+        for index, point in enumerate(sample_points):
+            if is_point_visible_from_camera(point, camera, room_polygon) and is_visible(
+                (camera['x'], camera['y']),
+                point,
+                room_polygon,
+                wall_segments,
+            ):
+                covered.add(index)
+        if covered:
+            candidate_coverages.append({'camera': camera, 'covers': covered})
+
+    uncovered = set(range(len(sample_points)))
+    selected_cameras: List[Dict] = []
+
+    for _ in range(max(1, max_cameras)):
+        best = None
+        best_new = set()
+        best_new_weight = 0.0
+        for entry in candidate_coverages:
+            new_cover = entry['covers'] & uncovered
+            new_weight = sum(sample_weights[idx] for idx in new_cover)
+            if new_weight > best_new_weight:
+                best = entry
+                best_new = new_cover
+                best_new_weight = new_weight
+
+        if best is None or best_new_weight <= 0:
+            break
+
+        camera = best['camera'].copy()
+        camera['id'] = len(selected_cameras) + 1
+        selected_cameras.append(camera)
+        uncovered -= best_new
+        if not uncovered:
+            break
+
+    return selected_cameras
+
 def calculate_coverage(
     polygon: List[Tuple[float, float]],
     cameras: List[Dict],
@@ -311,6 +398,7 @@ def calculate_coverage_percentage(
     cameras: List[Dict],
     sample_step: float = SAMPLE_STEP,
     priority_zones: Optional[List[Dict]] = None,
+    wall_segments: Optional[List[List[List[float]]]] = None,
 ) -> float:
     """Calculate coverage as a percentage."""
     sample_points, sample_weights = build_weighted_sample_points(
@@ -330,7 +418,12 @@ def calculate_coverage_percentage(
     covered = 0.0
     for index, point in enumerate(sample_points):
         for camera in cameras:
-            if is_point_visible_from_camera(point, camera, poly):
+            if is_point_visible_from_camera(point, camera, poly) and is_visible(
+                (camera['x'], camera['y']),
+                point,
+                poly,
+                wall_segments,
+            ):
                 covered += sample_weights[index] if sample_weights else 1.0
                 break
 
@@ -429,6 +522,54 @@ def optimize_camera_placement(
             break
 
     return selected_cameras
+
+
+def optimize_rooms(
+    rooms: List[Dict],
+    wall_segments: List[List[List[float]]],
+    doorways: List[Dict],
+    camera_settings: Dict,
+) -> List[Dict]:
+    all_cameras: List[Dict] = []
+    max_cameras = int(camera_settings.get('max_cameras', max(1, len(rooms))))
+    camera_range = float(camera_settings.get('camera_range', 150.0))
+    camera_fov = float(camera_settings.get('camera_fov', 90.0))
+
+    for room in rooms:
+        polygon_points = room.get('polygon', [])
+        if len(polygon_points) < 3:
+            continue
+
+        room_polygon = _build_polygon(polygon_points)
+        if room_polygon.is_empty:
+            continue
+
+        room_points = generate_sample_points(polygon_points, COVERAGE_SAMPLE_STEP)
+        if not room_points:
+            representative = room_polygon.representative_point()
+            room_points = [(float(representative.x), float(representative.y))]
+
+        sample_weights = [2.0 if room.get('is_priority') else 1.0 for _ in room_points]
+        candidates = generate_boundary_candidates(polygon_points, CANDIDATE_STEP)
+        room_limit = 2 if room.get('is_priority') else 1
+        room_limit = max(1, min(room_limit, max_cameras))
+
+        cameras = greedy_optimize(
+            candidates,
+            room_points,
+            room_polygon,
+            wall_segments,
+            sample_weights,
+            room_limit,
+            camera_range,
+            camera_fov,
+        )
+
+        for camera in cameras:
+            camera['room_id'] = room['id']
+        all_cameras.extend(cameras)
+
+    return all_cameras
 
 def optimize_with_genetic_algorithm(
     polygon: List[Tuple[float, float]],

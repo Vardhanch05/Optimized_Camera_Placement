@@ -78,6 +78,20 @@
 
         <!-- Tools Section -->
         <div class="panel-section">
+          <h3 class="panel-title">Extraction Mode</h3>
+          <div class="mode-toggle-group">
+            <label class="mode-toggle-option">
+              <input type="radio" name="extractionMode" value="single" checked>
+              <span>Single area mode</span>
+            </label>
+            <label class="mode-toggle-option">
+              <input type="radio" name="extractionMode" value="rooms">
+              <span>Room-by-room mode</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="panel-section">
           <h3 class="panel-title">Tools</h3>
           <div class="button-group">
             <button id="extractBtn" class="btn btn-primary">
@@ -143,6 +157,7 @@
         <!-- Extraction Review Panel (hidden by default) -->
         <div class="panel-section extraction-panel" id="extractionPanel" style="display: none;">
           <h3 class="panel-title">Extraction Review</h3>
+          <div id="extractionStats" class="extraction-stats" style="display:none;"></div>
           <div id="extractionLoading" class="extraction-loading" style="display:none;">
             <span class="loading-indicator"></span>
             <span>Extracting floor plan...</span>

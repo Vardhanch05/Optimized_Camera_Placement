@@ -5,9 +5,13 @@ export const AppState = {
   isClosed: false,
   cameras: [],            // [{id, x, y, angle, range, fov}]
   priorityZones: [],      // [{x, y, width, height, weight, label}]
+  rooms: [],              // room extraction results
+  wallSegments: [],       // [[ [x1, y1], [x2, y2] ]]
+  doorways: [],           // doorway extraction results
   selectedCameraId: null,
   mode: "draw",           // "draw" or "place"
   coverageVisible: true,
+  isRoomExtractionMode: false,
   // Global camera defaults
   globalRange: 150,
   globalFov: 90,
@@ -19,6 +23,8 @@ AppState.extractedImage = null; // HTMLImageElement
 AppState.extractionPending = false;
 AppState.extractionWarnings = [];
 AppState.isReviewingExtraction = false;
+AppState.roomCoverageByRoom = {};
+AppState.totalRoomCoverage = 0;
 
 // -------- Interaction State (not undoable) --------
 
@@ -42,6 +48,7 @@ function createStateSnapshot() {
     extractionPending: false,
     extractionWarnings: Array.isArray(AppState.extractionWarnings) ? [...AppState.extractionWarnings] : [],
     isReviewingExtraction: false,
+    roomCoverageByRoom: { ...(AppState.roomCoverageByRoom || {}) },
     _extractionResult: null
   });
 }

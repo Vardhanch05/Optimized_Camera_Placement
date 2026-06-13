@@ -34,7 +34,12 @@ export function render(state, interaction) {
 
   drawGrid();
 
-  if (state.priorityZones && state.priorityZones.length > 0) {
+  if (state.isRoomExtractionMode && Array.isArray(state.rooms) && state.rooms.length > 0) {
+    drawRooms(state.rooms);
+    drawWallSegments(state.wallSegments || []);
+    drawDoorways(state.doorways || []);
+    drawRoomLabels(state.rooms);
+  } else if (state.priorityZones && state.priorityZones.length > 0) {
     drawPriorityZones(state.priorityZones);
   }
   
@@ -60,13 +65,77 @@ export function render(state, interaction) {
   
   // Draw camera coverage
   if (state.coverageVisible && state.cameras.length > 0) {
-    drawCoverageAreas(state.cameras);
+    drawCoverageAreas(state, state.cameras);
   }
   
   // Draw cameras
   if (state.cameras.length > 0) {
     drawCameras(state.cameras, state.selectedCameraId);
   }
+}
+
+function drawRooms(rooms) {
+  const palette = ['#2d4a3e', '#2d3a4a', '#4a2d3a', '#3a3a2d', '#2d2d4a', '#2d4a4a', '#4a3a2d', '#3a2d4a'];
+  rooms.forEach((room, index) => {
+    const polygon = room.polygon || [];
+    if (!polygon.length) return;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(polygon[0][0], polygon[0][1]);
+    for (let i = 1; i < polygon.length; i++) {
+      ctx.lineTo(polygon[i][0], polygon[i][1]);
+    }
+    ctx.closePath();
+    ctx.fillStyle = palette[index % palette.length] + '33';
+    ctx.fill();
+    ctx.restore();
+  });
+}
+
+function drawWallSegments(wallSegments) {
+  ctx.save();
+  ctx.strokeStyle = '#888888';
+  ctx.lineWidth = 2;
+  wallSegments.forEach(segment => {
+    if (!Array.isArray(segment) || segment.length < 2) return;
+    ctx.beginPath();
+    ctx.moveTo(segment[0][0], segment[0][1]);
+    ctx.lineTo(segment[1][0], segment[1][1]);
+    ctx.stroke();
+  });
+  ctx.restore();
+}
+
+function drawDoorways(doorways) {
+  ctx.save();
+  ctx.strokeStyle = '#00cccc';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 3]);
+  doorways.forEach(doorway => {
+    const segment = doorway.gap_segment || [];
+    if (segment.length < 2) return;
+    ctx.beginPath();
+    ctx.moveTo(segment[0][0], segment[0][1]);
+    ctx.lineTo(segment[1][0], segment[1][1]);
+    ctx.stroke();
+  });
+  ctx.restore();
+}
+
+function drawRoomLabels(rooms) {
+  ctx.save();
+  ctx.font = '12px sans-serif';
+  rooms.forEach(room => {
+    const centroid = room.centroid || [];
+    if (centroid.length < 2) return;
+    const label = room.is_priority ? `${room.id} · priority` : room.id;
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
+    const textWidth = ctx.measureText(label).width;
+    ctx.fillRect(centroid[0] - textWidth / 2 - 6, centroid[1] - 16, textWidth + 12, 18);
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillText(label, centroid[0] - textWidth / 2, centroid[1] - 3);
+  });
+  ctx.restore();
 }
 
 function drawReviewPolygon(points, isClosed) {
@@ -214,18 +283,29 @@ function drawPriorityZones(priorityZones) {
   });
 }
 
-function drawCoverageAreas(cameras) {
+function drawCoverageAreas(state, cameras) {
   cameras.forEach(camera => {
     ctx.save();
     ctx.globalAlpha = 0.15;
     ctx.fillStyle = "#ef4444";
-    
-    ctx.beginPath();
-    ctx.moveTo(camera.x, camera.y);
-    
+
     const startAngle = (camera.angle - camera.fov / 2) * Math.PI / 180;
     const endAngle = (camera.angle + camera.fov / 2) * Math.PI / 180;
-    
+    if (state.isRoomExtractionMode && camera.room_id) {
+      const room = (state.rooms || []).find(entry => entry.id === camera.room_id);
+      if (room && Array.isArray(room.polygon) && room.polygon.length > 2) {
+        ctx.beginPath();
+        ctx.moveTo(room.polygon[0][0], room.polygon[0][1]);
+        for (let index = 1; index < room.polygon.length; index++) {
+          ctx.lineTo(room.polygon[index][0], room.polygon[index][1]);
+        }
+        ctx.closePath();
+        ctx.clip();
+      }
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(camera.x, camera.y);
     ctx.arc(camera.x, camera.y, camera.range, startAngle, endAngle);
     ctx.closePath();
     ctx.fill();

@@ -17,6 +17,7 @@ import { distance, isPointInPolygon } from "./geometry.js";
 import { calculateCoverage } from "./coverage.js";
 import {
   uploadAndExtract,
+  uploadAndExtractRooms,
   confirmExtraction,
   rejectExtraction,
   isInReviewMode,
@@ -43,9 +44,11 @@ const globalRangeSlider = document.getElementById("globalRangeSlider");
 const globalFovSlider = document.getElementById("globalFovSlider");
 const maxCamerasSlider = document.getElementById("maxCamerasSlider");
 const priorityZonesInput = document.getElementById("priorityZonesInput");
+const extractionModeInputs = document.querySelectorAll('input[name="extractionMode"]');
 const extractBtn = document.getElementById("extractBtn");
 const extractUpload = document.getElementById("extractUpload");
 const extractionPanel = document.getElementById("extractionPanel");
+const extractionStats = document.getElementById("extractionStats");
 const extractionLoading = document.getElementById("extractionLoading");
 const extractionWarnings = document.getElementById("extractionWarnings");
 const confirmExtractionBtn = document.getElementById("confirmExtractionBtn");
@@ -114,24 +117,33 @@ function getMousePos(e) {
 function updateUI() {
   undoBtn.disabled = !canUndo();
   redoBtn.disabled = !canRedo();
-  optimizeBtn.disabled = !AppState.isClosed || AppState.isReviewingExtraction;
+  optimizeBtn.disabled = AppState.isReviewingExtraction || (AppState.isRoomExtractionMode ? AppState.rooms.length === 0 : !AppState.isClosed);
   deleteCameraBtn.disabled = AppState.selectedCameraId === null;
 
   const modeText = document.getElementById("modeText");
   if (AppState.isReviewingExtraction) {
     modeText.textContent = "Reviewing Extraction";
+  } else if (AppState.isRoomExtractionMode) {
+    modeText.textContent = "Room-by-room mode";
   } else {
     modeText.textContent = AppState.mode === "draw" ? "Drawing Polygon" : "Placing Cameras";
   }
 
-  if (AppState.isClosed) {
+  if (AppState.isRoomExtractionMode) {
+    document.getElementById("cameraCount").style.display = AppState.rooms.length > 0 ? "block" : "none";
+    document.getElementById("cameraCountText").textContent = AppState.cameras.length;
+  } else if (AppState.isClosed) {
     document.getElementById("cameraCount").style.display = "block";
     document.getElementById("cameraCountText").textContent = AppState.cameras.length;
   } else {
     document.getElementById("cameraCount").style.display = "none";
   }
 
-  if (AppState.isClosed) {
+  if (AppState.isRoomExtractionMode) {
+    const coverageValue = Number.isFinite(AppState.totalRoomCoverage) ? AppState.totalRoomCoverage : 0;
+    document.getElementById("coverageDisplay").style.display = AppState.rooms.length > 0 ? "block" : "none";
+    document.getElementById("coverageText").textContent = `${Math.round(coverageValue * 100)}%`;
+  } else if (AppState.isClosed) {
     const coverage = calculateCoverage(AppState.polygon, AppState.cameras, undefined, AppState.priorityZones);
     document.getElementById("coverageDisplay").style.display = "block";
     document.getElementById("coverageText").textContent = coverage + "%";
@@ -183,6 +195,16 @@ function updateUI() {
 
   if (extractionPanel) {
     extractionPanel.style.display = AppState.isReviewingExtraction || AppState.extractionPending ? "block" : "none";
+  }
+
+  if (extractionStats) {
+    if (AppState.isRoomExtractionMode && (AppState.isReviewingExtraction || AppState.rooms.length > 0)) {
+      extractionStats.style.display = "block";
+      extractionStats.textContent = `Rooms: ${AppState.rooms.length} · Doorways: ${AppState.doorways.length}`;
+    } else {
+      extractionStats.style.display = "none";
+      extractionStats.textContent = "";
+    }
   }
 
   if (extractionLoading) {
@@ -248,6 +270,10 @@ canvas.addEventListener("mousemove", (e) => {
     return;
   }
 
+  if (AppState.isRoomExtractionMode) {
+    return;
+  }
+
   if (AppState.mode === "draw" && !AppState.isClosed && AppState.polygon.length > 0) {
     InteractionState.previewPoint = pos;
     render(AppState, InteractionState);
@@ -284,6 +310,10 @@ canvas.addEventListener("click", (e) => {
     if (insertReviewVertexAtPoint(pos)) {
       updateUI();
     }
+    return;
+  }
+
+  if (AppState.isRoomExtractionMode) {
     return;
   }
 
@@ -338,7 +368,9 @@ redoBtn.addEventListener("click", () => {
 });
 
 optimizeBtn.addEventListener("click", async () => {
-  if (!AppState.isClosed || AppState.isReviewingExtraction) return;
+  if (AppState.isReviewingExtraction) return;
+  if (!AppState.isRoomExtractionMode && !AppState.isClosed) return;
+  if (AppState.isRoomExtractionMode && AppState.rooms.length === 0) return;
 
   if (!parsePriorityZonesInput()) {
     alert("Priority zones must be valid JSON before optimizing.");
@@ -351,15 +383,26 @@ optimizeBtn.addEventListener("click", async () => {
   try {
     pushState();
 
-    const payload = {
-      polygon: AppState.polygon.map(p => ({ x: p.x, y: p.y })),
-      max_cameras: AppState.maxCameras || 10,
-      camera_range: AppState.globalRange || 150,
-      camera_fov: AppState.globalFov || 90,
-      priority_zones: AppState.priorityZones
-    };
+    const backendUrl = AppState.isRoomExtractionMode ? `${location.origin}/optimize-rooms` : `${location.origin}/optimize`;
+    const payload = AppState.isRoomExtractionMode
+      ? {
+          rooms: AppState.rooms,
+          wall_segments: AppState.wallSegments,
+          doorways: AppState.doorways,
+          camera_settings: {
+            max_cameras: AppState.maxCameras || 10,
+            camera_range: AppState.globalRange || 150,
+            camera_fov: AppState.globalFov || 90
+          }
+        }
+      : {
+          polygon: AppState.polygon.map(p => ({ x: p.x, y: p.y })),
+          max_cameras: AppState.maxCameras || 10,
+          camera_range: AppState.globalRange || 150,
+          camera_fov: AppState.globalFov || 90,
+          priority_zones: AppState.priorityZones
+        };
 
-    const backendUrl = `${location.origin}/optimize`;
     const resp = await fetch(backendUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -373,7 +416,21 @@ optimizeBtn.addEventListener("click", async () => {
     }
 
     const data = await resp.json();
-    if (data && data.success && Array.isArray(data.cameras)) {
+    if (AppState.isRoomExtractionMode && data && Array.isArray(data.cameras)) {
+      AppState.cameras = data.cameras.map(c => ({
+        id: c.id ?? (Date.now() + Math.random()),
+        x: c.x,
+        y: c.y,
+        angle: c.angle ?? 0,
+        range: c.range ?? AppState.globalRange,
+        fov: c.fov ?? AppState.globalFov,
+        room_id: c.room_id || null
+      }));
+      AppState.roomCoverageByRoom = data.coverage_by_room || {};
+      AppState.totalRoomCoverage = Number.isFinite(data.total_coverage) ? data.total_coverage : 0;
+      AppState.selectedCameraId = null;
+      updateUI();
+    } else if (data && data.success && Array.isArray(data.cameras)) {
       if (data.settings) {
         if (Number.isFinite(data.settings.max_cameras)) {
           AppState.maxCameras = data.settings.max_cameras;
@@ -434,6 +491,9 @@ clearBtn.addEventListener("click", () => {
     AppState.polygon = [];
     AppState.cameras = [];
     AppState.priorityZones = [];
+    AppState.rooms = [];
+    AppState.wallSegments = [];
+    AppState.doorways = [];
     AppState.isClosed = false;
     AppState.mode = "draw";
     AppState.selectedCameraId = null;
@@ -441,6 +501,8 @@ clearBtn.addEventListener("click", () => {
     AppState.extractionWarnings = [];
     AppState.isReviewingExtraction = false;
     AppState._extractionResult = null;
+    AppState.roomCoverageByRoom = {};
+    AppState.totalRoomCoverage = 0;
     InteractionState.previewPoint = null;
     InteractionState.reviewDraggingVertexIndex = null;
     InteractionState.reviewPointerDownOnVertex = false;
@@ -513,10 +575,27 @@ if (extractUpload) {
   extractUpload.addEventListener("change", (e) => {
     const file = e.target.files && e.target.files[0];
     if (file) {
-      uploadAndExtract(file)
+      const extractor = AppState.isRoomExtractionMode ? uploadAndExtractRooms : uploadAndExtract;
+      extractor(file)
         .then(() => updateUI())
         .catch(() => updateUI());
     }
+  });
+}
+
+if (extractionModeInputs) {
+  extractionModeInputs.forEach(input => {
+    input.addEventListener("change", () => {
+      AppState.isRoomExtractionMode = input.value === "rooms" && input.checked;
+      if (!AppState.isRoomExtractionMode) {
+        AppState.rooms = [];
+        AppState.wallSegments = [];
+        AppState.doorways = [];
+        AppState.roomCoverageByRoom = {};
+        AppState.totalRoomCoverage = 0;
+      }
+      updateUI();
+    });
   });
 }
 

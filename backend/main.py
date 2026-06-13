@@ -11,10 +11,14 @@ import uvicorn
 
 try:
     from .extract_models import ExtractionResponse, PriorityZone as ExtractPriorityZone
+    from .extract_models import DoorwayModel, RoomExtractionResponse, RoomModel
     from .extractor import extract_layout
+    from .room_extractor import extract_rooms as extract_room_layout
 except ImportError:
     from extract_models import ExtractionResponse, PriorityZone as ExtractPriorityZone
+    from extract_models import DoorwayModel, RoomExtractionResponse, RoomModel
     from extractor import extract_layout
+    from room_extractor import extract_rooms as extract_room_layout
 
 app = FastAPI(title="Camera Placement Optimizer API")
 
@@ -60,6 +64,19 @@ class CoverageRequest(BaseModel):
     polygon: List[Point]
     cameras: List[Camera]
     priority_zones: List[PriorityZone] = Field(default_factory=list)
+
+
+class CameraSettings(BaseModel):
+    max_cameras: int = 10
+    camera_range: float = 150.0
+    camera_fov: float = 90.0
+
+
+class OptimizeRoomsRequest(BaseModel):
+    rooms: List[RoomModel] = Field(default_factory=list)
+    wall_segments: List[List[List[float]]] = Field(default_factory=list)
+    doorways: List[DoorwayModel] = Field(default_factory=list)
+    camera_settings: CameraSettings = Field(default_factory=CameraSettings)
 
 # -------- Endpoints --------
 
@@ -227,6 +244,39 @@ def calculate_coverage(request: CoverageRequest):
         raise HTTPException(status_code=500, detail=f"Coverage calculation error: {str(e)}")
 
 
+def _read_uploaded_image(file: UploadFile):
+    filename = getattr(file, 'filename', '') or ''
+    from pathlib import Path
+
+    ext = Path(filename).suffix.lower()
+    allowed_exts = {'.png', '.jpg', '.jpeg', '.webp'}
+    allowed_mime = {'image/png', 'image/jpeg', 'image/webp'}
+
+    if ext == '' or ext not in allowed_exts:
+        raise HTTPException(status_code=415, detail="Unsupported file type. Please upload a PNG, JPEG, or WEBP image.")
+
+    if file.content_type not in allowed_mime:
+        raise HTTPException(status_code=415, detail="Unsupported file type. Please upload a PNG, JPEG, or WEBP image.")
+
+    contents = file.file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Empty file uploaded")
+    if len(contents) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large. Maximum allowed size is 10MB.")
+
+    try:
+        import numpy as np
+        import cv2
+    except Exception:
+        raise HTTPException(status_code=500, detail="Server missing image dependencies (cv2). Install required packages")
+
+    nparr = np.frombuffer(contents, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img is None:
+        raise HTTPException(status_code=400, detail="Could not read image file. The file may be corrupt or in an unsupported format.")
+    return img
+
+
 @app.post("/extract", response_model=ExtractionResponse)
 def extract(file: UploadFile = File(...)):
     """
@@ -298,6 +348,74 @@ def extract(file: UploadFile = File(...)):
     except Exception:
         # Do not expose internal errors to clients
         raise HTTPException(status_code=500, detail="Extraction failed unexpectedly — please try again later")
+
+
+@app.post("/extract-rooms", response_model=RoomExtractionResponse)
+async def extract_rooms_endpoint(file: UploadFile = File(...)):
+    try:
+        image = _read_uploaded_image(file)
+        return extract_room_layout(image)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Room extraction failed unexpectedly — please try again later")
+
+
+@app.post("/optimize-rooms")
+def optimize_rooms_endpoint(request: OptimizeRoomsRequest):
+    try:
+        try:
+            from .optimizer import optimize_rooms, calculate_coverage_percentage, generate_sample_points
+        except Exception:
+            from optimizer import optimize_rooms, calculate_coverage_percentage, generate_sample_points
+
+        rooms = [room.model_dump() for room in request.rooms]
+        wall_segments = request.wall_segments or []
+        doorways = [doorway.model_dump() for doorway in request.doorways]
+        settings = request.camera_settings.model_dump()
+
+        cameras = optimize_rooms(rooms, wall_segments, doorways, settings)
+        coverage_by_room = {}
+        weighted_total = 0.0
+        weighted_covered = 0.0
+
+        from shapely.geometry import Polygon
+
+        for room in rooms:
+            polygon = Polygon(room.get("polygon", []))
+            if polygon.is_empty:
+                coverage_by_room[room["id"]] = 0.0
+                continue
+            if not polygon.is_valid:
+                polygon = polygon.buffer(0)
+            if polygon.is_empty:
+                coverage_by_room[room["id"]] = 0.0
+                continue
+
+            room_cameras = [camera for camera in cameras if camera.get("room_id") == room["id"]]
+            coverage = calculate_coverage_percentage(
+                list(polygon.exterior.coords),
+                room_cameras,
+                wall_segments=wall_segments,
+            ) / 100.0
+            coverage_by_room[room["id"]] = round(coverage, 2)
+
+            sample_points = generate_sample_points(list(polygon.exterior.coords))
+            room_weight = max(1.0, float(len(sample_points) or 1))
+            weighted_total += room_weight
+            weighted_covered += coverage * room_weight
+
+        total_coverage = round(weighted_covered / weighted_total if weighted_total > 0 else 0.0, 2)
+
+        return {
+            "cameras": cameras,
+            "coverage_by_room": coverage_by_room,
+            "total_coverage": total_coverage,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Room optimization error: {str(exc)}")
 
 # -------- Run Server --------
 
