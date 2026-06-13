@@ -25,6 +25,17 @@ function setExtractionWorkingPolygon(data) {
   }
 }
 
+function setExtractionWorkingRooms(data) {
+  AppState.rooms = Array.isArray(data.rooms) ? data.rooms : [];
+  AppState.wallSegments = Array.isArray(data.wall_segments) ? data.wall_segments : [];
+  AppState.doorways = Array.isArray(data.doorways) ? data.doorways : [];
+  AppState.polygon = [];
+  AppState.polygonClosed = false;
+  AppState.isClosed = false;
+  AppState.mode = 'place';
+  AppState.isRoomExtractionMode = true;
+}
+
 function pointToSegmentDistance(point, start, end) {
   const dx = end.x - start.x;
   const dy = end.y - start.y;
@@ -74,6 +85,9 @@ function clampPolygonMinimumVertices() {
 
 export async function uploadAndExtract(file) {
   if (!file) return;
+  if (AppState.isRoomExtractionMode) {
+    return uploadAndExtractRooms(file);
+  }
   AppState.extractionPending = true;
   render(AppState, {});
 
@@ -122,20 +136,75 @@ export async function uploadAndExtract(file) {
   }
 }
 
+export async function uploadAndExtractRooms(file) {
+  if (!file) return;
+  AppState.extractionPending = true;
+  render(AppState, {});
+
+  try {
+    const form = new FormData();
+    form.append('file', file, file.name);
+
+    const resp = await fetch(`${location.origin}/extract-rooms`, {
+      method: 'POST',
+      body: form
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      alert('Extraction failed: ' + (err.detail || resp.statusText || resp.status));
+      return;
+    }
+
+    const data = await resp.json();
+    const imgUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.src = imgUrl;
+
+    await new Promise((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error("Uploaded image could not be loaded for review"));
+    });
+
+    AppState.extractedImage = img;
+    AppState.extractionWarnings = data.warnings || [];
+    AppState._extractionResult = data;
+    setExtractionWorkingRooms(data);
+    AppState.isReviewingExtraction = true;
+    InteractionState.reviewDraggingVertexIndex = null;
+    InteractionState.reviewPointerDownOnVertex = false;
+    render(AppState, {});
+  } catch (e) {
+    console.error('Extraction error', e);
+    alert('Extraction error: ' + e.message);
+  } finally {
+    AppState.extractionPending = false;
+    render(AppState, {});
+  }
+}
+
 export function confirmExtraction() {
   const data = AppState._extractionResult;
   if (!data) return;
 
   pushState();
-  // Commit the reviewed polygon as-is so any vertex edits are preserved.
-  AppState.isClosed = Array.isArray(AppState.polygon) && AppState.polygon.length >= 3;
-  // Mirror manual completion flow: expose legacy flag and clear preview point
-  AppState.polygonClosed = AppState.isClosed === true;
+  if (AppState.isRoomExtractionMode) {
+    AppState.rooms = Array.isArray(data.rooms) ? data.rooms : [];
+    AppState.wallSegments = Array.isArray(data.wall_segments) ? data.wall_segments : [];
+    AppState.doorways = Array.isArray(data.doorways) ? data.doorways : [];
+    AppState.polygon = [];
+    AppState.isClosed = false;
+    AppState.polygonClosed = false;
+    AppState.mode = 'place';
+  } else {
+    AppState.isClosed = Array.isArray(AppState.polygon) && AppState.polygon.length >= 3;
+    AppState.polygonClosed = AppState.isClosed === true;
+    AppState.mode = 'place';
+  }
   InteractionState.previewPoint = null;
-  AppState.mode = 'place';
 
   // Load priority zones
-  if (Array.isArray(data.suggested_priority_zones)) {
+  if (!AppState.isRoomExtractionMode && Array.isArray(data.suggested_priority_zones)) {
     AppState.priorityZones = data.suggested_priority_zones.map(z => ({
       x: z.x,
       y: z.y,
@@ -161,6 +230,9 @@ export function rejectExtraction() {
   AppState.extractionWarnings = [];
   AppState._extractionResult = null;
   AppState.polygon = [];
+  AppState.rooms = [];
+  AppState.wallSegments = [];
+  AppState.doorways = [];
   AppState.polygonClosed = false;
   AppState.isClosed = false;
   AppState.mode = 'draw';
